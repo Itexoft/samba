@@ -1,0 +1,12 @@
+---
+name: build
+'on':
+  push:
+    branches: [work]
+  pull_request:
+    branches: [work]
+jobs:
+  build:
+    uses: Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@main
+    with:
+      project_name: samba
