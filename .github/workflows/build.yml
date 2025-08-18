@@ -11,7 +11,7 @@ jobs:
       apt_packages: >
         libgnutls28-dev libpopt-dev python3 pkg-config
         libldap2-dev liblmdb-dev
-      brew_packages: gnutls popt python pkg-config openldap lmdb
+      brew_packages: gnutls popt python pkg-config openldap lmdb libgpgme11-dev gpgme-devel python-gpgme
       msys2_packages: >
         mingw-w64-x86_64-gnutls mingw-w64-x86_64-popt
         mingw-w64-x86_64-python mingw-w64-x86_64-pkg-config
