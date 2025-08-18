@@ -48,7 +48,8 @@ jobs:
         GP=$(brew --prefix gpgme)/lib/pkgconfig
         LA=$(brew --prefix libassuan)/lib/pkgconfig
         GE=$(brew --prefix libgpg-error)/lib/pkgconfig
-        echo "PKG_CONFIG_PATH=$GP:$LA:$GE:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        export PKG_CONFIG_PATH=$GP:$LA:$GE:$PKG_CONFIG_PATH
+        echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
         pip3 install gpg
       pre_setup_script_windows: |
         pkg-config --version || true
