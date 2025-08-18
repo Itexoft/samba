@@ -3,7 +3,7 @@
 
 jobs:
   build:
-    uses: ./.github/workflows/autotools-multi-rid-build.yml
+    uses: Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
     with:
       project_name: samba
       apt_packages: >
