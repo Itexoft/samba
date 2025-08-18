@@ -1,31 +1,30 @@
-name: build
 on:
   workflow_dispatch:
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y libgnutls28-dev libpopt-dev python3
-        if: runner.os == 'Linux'
-      - run: brew install gnutls popt python
-        if: runner.os == 'macOS'
-      - uses: msys2/setup-msys2@v2
-        if: runner.os == 'Windows'
-        with:
-          update: true
-          install: >-
-            base-devel mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-gnutls mingw-w64-x86_64-popt
-            mingw-w64-x86_64-python
-          msystem: MINGW64
-          path-type: minimal
-      - uses: >-
-          Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
-        with:
-          project_name: samba
+    uses: your-org/your-repo/.github/workflows/autotools-multi-rid-build.yml@master
+    with:
+      project_name: samba
+      apt_packages: libgnutls28-dev libpopt-dev python3
+      brew_packages: gnutls popt python
+      msys2_packages: mingw-w64-x86_64-gnutls mingw-w64-x86_64-popt mingw-w64-x86_64-python
+      pre_setup_script_linux: |
+        pkg-config --version
+      pre_setup_script_macos: |
+        pkg-config --version
+      pre_setup_script_windows: |
+        pkg-config --version || true
+      pre_configure_script: |
+        autoreconf -i || true
+      configure_args: |
+        --enable-silent-rules
+      build_dir: build
+      autoreconf: "false"
+      checkout_submodules: "recursive"
+      extra_env_linux: |
+        CCACHE_DIR=/tmp/.ccache
+      extra_env_macos: |
+        CCACHE_DIR=/tmp/.ccache
+      extra_env_windows: |
+        CCACHE_DIR=/c/tmp/.ccache
+    secrets: inherit
