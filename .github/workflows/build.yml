@@ -29,7 +29,7 @@ jobs:
         build-essential debhelper docbook-xml docbook-xsl libkeyutils-dev
         xz-utils libnsl-dev libtirpc-dev
       brew_packages: >
-        gnutls popt python pkg-config openldap lmdb gpgme jansson
+        gnutls popt python pkg-config openldap lmdb gpgme gnupg jansson
         libtirpc flex cups libarchive dbus glib tracker
         autoconf automake libtool git gdb perl cpanminus
       msys2_packages: >
@@ -45,6 +45,11 @@ jobs:
       pre_setup_script_macos: |
         pkg-config --version
         cpanm Parse::Yapp
+        GP=$(brew --prefix gpgme)/lib/pkgconfig
+        LA=$(brew --prefix libassuan)/lib/pkgconfig
+        GE=$(brew --prefix libgpg-error)/lib/pkgconfig
+        echo "PKG_CONFIG_PATH=$GP:$LA:$GE:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        pip3 install gpg
       pre_setup_script_windows: |
         pkg-config --version || true
         curl -L https://cpanmin.us | perl - --self-upgrade
@@ -61,4 +66,5 @@ jobs:
         CCACHE_DIR=/tmp/.ccache
       extra_env_windows: |
         CCACHE_DIR=/c/tmp/.ccache
+        CC=gcc
     secrets: inherit
