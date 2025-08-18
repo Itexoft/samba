@@ -11,8 +11,12 @@ jobs:
       apt_packages: >
         libgnutls28-dev libpopt-dev python3 pkg-config
         libldap2-dev liblmdb-dev libgpgme11-dev
-      brew_packages: gnutls popt python pkg-config openldap lmdb python-gpgme
+        git gdb perl libparse-yapp-perl
+      brew_packages: >
+        gnutls popt python pkg-config openldap lmdb python-gpgme
+        autoconf automake libtool git gdb perl cpanminus
       msys2_packages: >
+        git perl perl-parse-yapp perl-app-cpanminus coreutils
         mingw-w64-x86_64-gnutls mingw-w64-x86_64-popt
         mingw-w64-x86_64-python mingw-w64-x86_64-pkg-config
         mingw-w64-x86_64-openldap mingw-w64-x86_64-lmdb
@@ -20,8 +24,10 @@ jobs:
         pkg-config --version
       pre_setup_script_macos: |
         pkg-config --version
+        cpanm Parse::Yapp
       pre_setup_script_windows: |
         pkg-config --version || true
+        cpanm Parse::Yapp
       pre_configure_script: |
         autoreconf -i || true
       configure_path: ./configure
