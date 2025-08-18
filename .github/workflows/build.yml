@@ -1,10 +1,8 @@
 ---
 name: build
-'on':
-  push:
-    branches: [work]
-  pull_request:
-    branches: [work]
+on:
+  workflow_dispatch:
+  
 jobs:
   linux:
     runs-on: ubuntu-latest
