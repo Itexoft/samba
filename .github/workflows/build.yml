@@ -1,16 +1,19 @@
-on:
+---
+'on':
   workflow_dispatch:
 
 jobs:
   build:
-    uses: Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
+    uses: >-
+      Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
     with:
       project_name: samba
-      apt_packages: libgnutls28-dev libpopt-dev python3 pkg-config
-      brew_packages: gnutls popt python pkg-config
+      apt_packages: libgnutls28-dev libpopt-dev python3 pkg-config libldap2-dev
+      brew_packages: gnutls popt python pkg-config openldap
       msys2_packages: >
         mingw-w64-x86_64-gnutls mingw-w64-x86_64-popt
         mingw-w64-x86_64-python mingw-w64-x86_64-pkg-config
+        mingw-w64-x86_64-openldap
       pre_setup_script_linux: |
         pkg-config --version
       pre_setup_script_macos: |
