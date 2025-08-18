@@ -3,8 +3,7 @@
 
 jobs:
   build:
-    uses: >-
-      Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
+    uses: Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
     with:
       project_name: samba
       apt_packages: >
@@ -33,7 +32,7 @@ jobs:
         libtirpc flex cups libarchive dbus glib tracker
         autoconf automake libtool git gdb perl cpanminus
       msys2_packages: >
-        base-devel mingw-w64-x86_64-toolchain git perl coreutils flex libtirpc
+        git perl coreutils flex libtirpc
         mingw-w64-x86_64-libarchive mingw-w64-x86_64-gnutls
         mingw-w64-x86_64-popt mingw-w64-x86_64-python
         mingw-w64-x86_64-pkg-config mingw-w64-x86_64-openldap
