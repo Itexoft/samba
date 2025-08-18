@@ -1,4 +1,3 @@
----
 'on':
   workflow_dispatch:
 
@@ -28,18 +27,19 @@ jobs:
         python3-requests libparse-yapp-perl perl-modules xfslibs-dev
         glusterfs-common libcephfs-dev libtracker-sparql-3.0-dev
         build-essential debhelper docbook-xml docbook-xsl libkeyutils-dev
-        xz-utils libgamin-dev libtirpc-dev
+        xz-utils libnsl-dev libtirpc-dev
       brew_packages: >
         gnutls popt python pkg-config openldap lmdb gpgme jansson
-        libtirpc flex cups linux-pam libarchive dbus glib tracker
+        libtirpc flex cups libarchive dbus glib tracker
         autoconf automake libtool git gdb perl cpanminus
       msys2_packages: >
-        git perl coreutils flex libtirpc libarchive
-        mingw-w64-x86_64-gnutls mingw-w64-x86_64-popt
-        mingw-w64-x86_64-python mingw-w64-x86_64-pkg-config
-        mingw-w64-x86_64-openldap mingw-w64-x86_64-lmdb
-        mingw-w64-x86_64-gpgme mingw-w64-x86_64-jansson
-        mingw-w64-x86_64-glib2 mingw-w64-x86_64-dbus
+        base-devel mingw-w64-x86_64-toolchain git perl coreutils flex libtirpc
+        mingw-w64-x86_64-libarchive mingw-w64-x86_64-gnutls
+        mingw-w64-x86_64-popt mingw-w64-x86_64-python
+        mingw-w64-x86_64-pkg-config mingw-w64-x86_64-openldap
+        mingw-w64-x86_64-lmdb mingw-w64-x86_64-gpgme
+        mingw-w64-x86_64-jansson mingw-w64-x86_64-glib2
+        mingw-w64-x86_64-dbus
       pre_setup_script_linux: |
         pkg-config --version
       pre_setup_script_macos: |
