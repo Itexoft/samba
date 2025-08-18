@@ -1,9 +1,11 @@
+---
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    uses: Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
+    uses: >
+      Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
     with:
       project_name: samba
       apt_packages: libgnutls28-dev libpopt-dev python3 pkg-config
@@ -21,8 +23,8 @@ jobs:
         autoreconf -i || true
       configure_args: |
         --enable-silent-rules
-      configure_path: ../configure
-      build_dir: build
+      configure_path: ./configure
+      build_dir: ""
       autoreconf: "false"
       checkout_submodules: "recursive"
       extra_env_linux: |
