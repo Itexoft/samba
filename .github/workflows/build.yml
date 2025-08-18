@@ -1,63 +1,35 @@
 ---
 name: build
-on:
-  workflow_dispatch:
-  
+'on':
+  push:
+    branches: [work]
+  pull_request:
+    branches: [work]
 jobs:
-  linux:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - run: |
           sudo apt-get update
           sudo apt-get install -y libgnutls28-dev libpopt-dev python3
-      - run: |
-          set -euo pipefail
-          mkdir -p artifacts
-          ./configure
-          make
-          make DESTDIR="$(pwd)/artifacts" install
-      - uses: actions/upload-artifact@v4
-        with:
-          name: samba-linux
-          path: artifacts/**
-  macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          brew update
-          brew install gnutls popt python
-      - run: |
-          set -euo pipefail
-          mkdir -p artifacts
-          ./configure
-          make
-          make DESTDIR="$(pwd)/artifacts" install
-      - uses: actions/upload-artifact@v4
-        with:
-          name: samba-osx
-          path: artifacts/**
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
+        if: runner.os == 'Linux'
+      - run: brew install gnutls popt python
+        if: runner.os == 'macOS'
       - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
         with:
           update: true
           install: >-
-            base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-gnutls
-            mingw-w64-x86_64-libpopt mingw-w64-x86_64-python
+            base-devel mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-gnutls mingw-w64-x86_64-popt
+            mingw-w64-x86_64-python
           msystem: MINGW64
           path-type: minimal
-      - shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts
-          ./configure
-          make
-          make DESTDIR="$(pwd)/artifacts" install
-      - uses: actions/upload-artifact@v4
+      - uses: >-
+          Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
         with:
-          name: samba-win
-          path: artifacts/**
+          project_name: samba
