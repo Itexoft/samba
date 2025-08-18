@@ -21,8 +21,8 @@ jobs:
         autoreconf -i || true
       configure_args: |
         --enable-silent-rules
-      configure_path: ../configure
-      build_dir: build
+      configure_path: ./configure
+      build_dir: ""
       autoreconf: "false"
       checkout_submodules: "recursive"
       extra_env_linux: |
