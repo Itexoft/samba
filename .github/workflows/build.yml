@@ -1,0 +1,35 @@
+---
+name: build
+'on':
+  push:
+    branches: [work]
+  pull_request:
+    branches: [work]
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libgnutls28-dev libpopt-dev python3
+        if: runner.os == 'Linux'
+      - run: brew install gnutls popt python
+        if: runner.os == 'macOS'
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          update: true
+          install: >-
+            base-devel mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-gnutls mingw-w64-x86_64-popt
+            mingw-w64-x86_64-python
+          msystem: MINGW64
+          path-type: minimal
+      - uses: >-
+          Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
+        with:
+          project_name: samba
