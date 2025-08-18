@@ -1,9 +1,9 @@
-'on':
+on:
   workflow_dispatch:
+
 jobs:
   build:
-    uses: >
-      Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
+    uses: Itexoft/DevOpsKit/.github/workflows/autotools-multi-rid-build.yml@master
     with:
       project_name: samba
       apt_packages: libgnutls28-dev libpopt-dev python3 pkg-config
