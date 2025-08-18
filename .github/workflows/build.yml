@@ -9,17 +9,37 @@ jobs:
     with:
       project_name: samba
       apt_packages: >
-        libgnutls28-dev libpopt-dev python3 pkg-config
-        libldap2-dev liblmdb-dev libgpgme11-dev
-        git gdb perl libparse-yapp-perl
+        acl attr autoconf binutils bison ccache curl chrpath codespell flex
+        gcc gdb git gzip hostname htop jq lcov make mold patch perl
+        psmisc rng-tools rsync sed shfmt sudo tar tree wget cargo
+        lmdb-utils mingw-w64 zlib1g-dev landscape-common libbsd-dev liburing-dev
+        libarchive-dev libblkid-dev libcap-dev libacl1-dev libattr1-dev
+        libutf8proc-dev libssl-dev libclang-dev libpopt-dev libreadline-dev
+        libjansson-dev liblmdb-dev libncurses5-dev libsystemd-dev libkrb5-dev
+        libldap2-dev libcups2-dev libpam0g-dev libgpgme11-dev libgnutls28-dev
+        gnutls-bin libtasn1-bin libtasn1-dev uuid-dev libjs-jquery
+        libavahi-common-dev libdbus-1-dev libpcap-dev libunwind-dev
+        libglib2.0-dev libicu-dev heimdal-multidev libevent-dev locales
+        language-pack-en bind9utils dnsutils xsltproc krb5-user
+        krb5-config krb5-kdc apt-utils pkg-config procps lsb-release
+        mawk shellcheck python3 python3-cryptography python3-dev
+        python3-dbg python3-iso8601 python3-gpg python3-markdown
+        python3-dnspython python3-pyasn1 python3-setproctitle
+        python3-requests libparse-yapp-perl perl-modules xfslibs-dev
+        glusterfs-common libcephfs-dev libtracker-sparql-3.0-dev
+        build-essential debhelper docbook-xml docbook-xsl libkeyutils-dev
+        xz-utils libgamin-dev libtirpc-dev
       brew_packages: >
-        gnutls popt python pkg-config openldap lmdb python-gpgme
+        gnutls popt python pkg-config openldap lmdb gpgme jansson
+        libtirpc flex cups linux-pam libarchive dbus glib tracker
         autoconf automake libtool git gdb perl cpanminus
       msys2_packages: >
-        git perl perl-parse-yapp perl-app-cpanminus coreutils
+        git perl coreutils flex libtirpc libarchive
         mingw-w64-x86_64-gnutls mingw-w64-x86_64-popt
         mingw-w64-x86_64-python mingw-w64-x86_64-pkg-config
         mingw-w64-x86_64-openldap mingw-w64-x86_64-lmdb
+        mingw-w64-x86_64-gpgme mingw-w64-x86_64-jansson
+        mingw-w64-x86_64-glib2 mingw-w64-x86_64-dbus
       pre_setup_script_linux: |
         pkg-config --version
       pre_setup_script_macos: |
@@ -27,6 +47,7 @@ jobs:
         cpanm Parse::Yapp
       pre_setup_script_windows: |
         pkg-config --version || true
+        curl -L https://cpanmin.us | perl - --self-upgrade
         cpanm Parse::Yapp
       pre_configure_script: |
         autoreconf -i || true
