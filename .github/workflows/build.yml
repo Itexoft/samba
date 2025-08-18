@@ -30,15 +30,7 @@ jobs:
       brew_packages: >
         gnutls popt python pkg-config openldap lmdb gpgme gnupg jansson
         libtirpc flex cups libarchive dbus glib tracker
-        autoconf automake libtool git gdb perl cpanminus
-      msys2_packages: >
-        git perl coreutils flex libtirpc
-        mingw-w64-x86_64-libarchive mingw-w64-x86_64-gnutls
-        mingw-w64-x86_64-popt mingw-w64-x86_64-python
-        mingw-w64-x86_64-pkg-config mingw-w64-x86_64-openldap
-        mingw-w64-x86_64-lmdb mingw-w64-x86_64-gpgme
-        mingw-w64-x86_64-jansson mingw-w64-x86_64-glib2
-        mingw-w64-x86_64-dbus
+        autoconf automake libtool git gdb perl cpanminus gpgmepy
       pre_setup_script_linux: |
         pkg-config --version
       pre_setup_script_macos: |
@@ -49,11 +41,7 @@ jobs:
         GE=$(brew --prefix libgpg-error)/lib/pkgconfig
         export PKG_CONFIG_PATH=$GP:$LA:$GE:$PKG_CONFIG_PATH
         echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
-        pip3 install gpg
-      pre_setup_script_windows: |
-        pkg-config --version || true
-        curl -L https://cpanmin.us | perl - --self-upgrade
-        cpanm Parse::Yapp
+      enable_windows: "false"
       pre_configure_script: |
         autoreconf -i || true
       configure_path: ./configure
@@ -64,7 +52,39 @@ jobs:
         CCACHE_DIR=/tmp/.ccache
       extra_env_macos: |
         CCACHE_DIR=/tmp/.ccache
-      extra_env_windows: |
-        CCACHE_DIR=/c/tmp/.ccache
-        CC=gcc
     secrets: inherit
+
+  windows-msys2:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: >-
+            base-devel git perl cpanminus flex
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-gnutls
+            mingw-w64-x86_64-popt
+            mingw-w64-x86_64-openldap
+            mingw-w64-x86_64-lmdb
+            mingw-w64-x86_64-gpgme
+            mingw-w64-x86_64-jansson
+            mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-dbus
+      - name: Perl deps
+        shell: msys2 {0}
+        run: |
+          cpanm Parse::Yapp
+      - name: Configure
+        shell: msys2 {0}
+        run: |
+          autoreconf -i || true
+          ./configure
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          make -j2
