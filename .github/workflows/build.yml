@@ -19,8 +19,6 @@ jobs:
         pkg-config --version || true
       pre_configure_script: |
         autoreconf -i || true
-      configure_args: |
-        --enable-silent-rules
       configure_path: ./configure
       build_dir: ""
       autoreconf: "false"
