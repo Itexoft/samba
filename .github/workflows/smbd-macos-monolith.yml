@@ -8,38 +8,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, x86_64]
+        arch: [arm64]
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: deps and build
         run: |
-          archcmd=""
-          if [ "${{ matrix.arch }}" = "x86_64" ]; then archcmd="arch -x86_64"; fi
-          $archcmd brew update
+          brew update
           for pkg in gpgme libassuan libgpg-error gettext gpgmepy gnupg gnutls popt python pkg-config openldap lmdb jansson libtirpc flex bison cups libarchive dbus glib autoconf automake libtool git gdb perl cpanminus swig krb5 readline libxcrypt icu4c utf8proc cmocka openssl@3 python-markdown; do
-            $archcmd brew list "$pkg" >/dev/null 2>&1 || $archcmd brew install "$pkg"
+            brew list "$pkg" >/dev/null 2>&1 || brew install "$pkg"
           done
-          $archcmd cpanm Parse::Yapp
-          B=$($archcmd brew --prefix)
-          GP=$($archcmd brew --prefix gpgme)
-          AS=$($archcmd brew --prefix libassuan)
-          GE=$($archcmd brew --prefix libgpg-error)
-          GT=$($archcmd brew --prefix gettext)
-          TI=$($archcmd brew --prefix libtirpc)
-          AR=$($archcmd brew --prefix libarchive)
-          KR=$($archcmd brew --prefix krb5)
-          OL=$($archcmd brew --prefix openldap)
-          CU=$($archcmd brew --prefix cups)
-          GN=$($archcmd brew --prefix gnutls)
-          RL=$($archcmd brew --prefix readline)
-          LX=$($archcmd brew --prefix libxcrypt)
-          IC=$($archcmd brew --prefix icu4c)
-          U8=$($archcmd brew --prefix utf8proc)
-          O3=$($archcmd brew --prefix openssl@3)
-          FB=$($archcmd brew --prefix bison)
-          FX=$($archcmd brew --prefix flex)
+          cpanm Parse::Yapp
+          B=$(brew --prefix)
+          GP=$(brew --prefix gpgme)
+          AS=$(brew --prefix libassuan)
+          GE=$(brew --prefix libgpg-error)
+          GT=$(brew --prefix gettext)
+          TI=$(brew --prefix libtirpc)
+          AR=$(brew --prefix libarchive)
+          KR=$(brew --prefix krb5)
+          OL=$(brew --prefix openldap)
+          CU=$(brew --prefix cups)
+          GN=$(brew --prefix gnutls)
+          RL=$(brew --prefix readline)
+          LX=$(brew --prefix libxcrypt)
+          IC=$(brew --prefix icu4c)
+          U8=$(brew --prefix utf8proc)
+          O3=$(brew --prefix openssl@3)
+          FB=$(brew --prefix bison)
+          FX=$(brew --prefix flex)
           export PATH="$B/opt/python@3.13/libexec/bin:$FB/bin:$FX/bin:$GP/bin:$B/bin:$PATH"
           export PKG_CONFIG_PATH="$IC/lib/pkgconfig:$U8/lib/pkgconfig:$GN/lib/pkgconfig:$GP/lib/pkgconfig:$AS/lib/pkgconfig:$GE/lib/pkgconfig:$TI/lib/pkgconfig:$AR/lib/pkgconfig:$KR/lib/pkgconfig:$OL/lib/pkgconfig:$CU/lib/pkgconfig:$O3/lib/pkgconfig:$B/lib/pkgconfig:$B/share/pkgconfig"
           export CPPFLAGS="-I$RL/include -I$GN/include -I$LX/include -I$IC/include -I$U8/include -I$O3/include -I$B/include -I$GP/include -I$AS/include -I$GE/include -I$GT/include -I$AR/include -I$KR/include -I$OL/include -I$CU/include $CPPFLAGS"
@@ -63,13 +61,13 @@ jobs:
           chmod +x .ci/bison
           export PATH="$(pwd)/.ci:$PATH"
           PYBIN=$B/opt/python@3.13/bin/python3
-          $archcmd $PYBIN -m venv --system-site-packages .venv
+          $PYBIN -m venv --system-site-packages .venv
           . .venv/bin/activate
           python -m pip install --upgrade pip
           python -m pip install dnspython iso8601 pyasn1 setproctitle requests markdown cryptography
           PY="$(pwd)/.venv/bin/python"
-          CPPFLAGS="-include $(pwd)/.ci/compat_darwin.h $CPPFLAGS" CFLAGS="-include $(pwd)/.ci/compat_darwin.h $CFLAGS" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" PYTHON="$PY" $archcmd $PY ./buildtools/bin/waf configure --bundled-libraries=ALL --with-shared-modules=!DEFAULT --nonshared-binary=smbd/smbd --without-ad-dc --enable-selftest=no --with-static-modules=vfs_fruit,vfs_streams_xattr,vfs_catia,vfs_acl_xattr,vfs_acl_tdb,vfs_xattr_tdb,vfs_recycle,vfs_shadow_copy2,vfs_full_audit,vfs_extd_audit,vfs_readahead,vfs_preopen,vfs_aio_pthread,vfs_fake_perms,vfs_readonly,vfs_offline,vfs_time_audit,vfs_commit,vfs_crossrename,vfs_dirsort,vfs_expand_msdfs,vfs_default_quota,vfs_fileid,vfs_streams_depot,vfs_syncops,vfs_widelinks,vfs_worm,vfs_audit,auth_unix,auth_wbc,auth_winbind,auth_server,auth_domain,auth_netlogond,auth_script,auth_samba4,auth_builtin,idmap_tdb,idmap_tdb2,idmap_rid,idmap_autorid,idmap_ad,idmap_ldap,idmap_script,idmap_hash,idmap_nss,pdb_tdbsam,pdb_smbpasswd,pdb_wbc_sam,pdb_ldapsam
-          $archcmd $PY ./buildtools/bin/waf build smbd
+          CPPFLAGS="-include $(pwd)/.ci/compat_darwin.h $CPPFLAGS" CFLAGS="-include $(pwd)/.ci/compat_darwin.h $CFLAGS" PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" PYTHON="$PY" ./configure --bundled-libraries=ALL --nonshared-binary=smbd/smbd --without-ad-dc --enable-selftest=no --with-static-modules=vfs_fruit,vfs_streams_xattr,vfs_catia,vfs_acl_xattr,vfs_acl_tdb,vfs_xattr_tdb,vfs_recycle,vfs_shadow_copy2,vfs_full_audit,vfs_extd_audit,vfs_readahead,vfs_preopen,vfs_aio_pthread,vfs_fake_perms,vfs_readonly,vfs_offline,vfs_time_audit,vfs_commit,vfs_crossrename,vfs_dirsort,vfs_expand_msdfs,vfs_default_quota,vfs_fileid,vfs_streams_depot,vfs_syncops,vfs_widelinks,vfs_worm,vfs_audit,auth_unix,auth_wbc,auth_winbind,auth_server,auth_domain,auth_netlogond,auth_script,auth_samba4,auth_builtin,idmap_tdb,idmap_tdb2,idmap_rid,idmap_autorid,idmap_ad,idmap_ldap,idmap_script,idmap_hash,idmap_nss,pdb_tdbsam,pdb_smbpasswd,pdb_wbc_sam,pdb_ldapsam
+          make smbd
           mkdir -p out
           cp bin/default/source3/smbd/smbd out/smbd
           out/smbd -V > out/smbd.txt
