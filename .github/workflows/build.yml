@@ -102,3 +102,16 @@ jobs:
           ./configure --without-acl-support --without-gettext --bundled-libraries=ALL
 
           make JOBS="$(sysctl -n hw.ncpu)"
+
+      - name: archive
+        run: |
+          mkdir -p out
+          find bin -type f -perm /111 -exec cp {} out/ \; || true
+          if [ "$(ls -A out)" ]; then
+            tar -czf samba-${{ matrix.os }}.tar.gz -C out .
+          fi
+      - uses: actions/upload-artifact@v4
+        if: ${{ hashFiles('samba-' + matrix.os + '.tar.gz') != '' }}
+        with:
+          name: samba-${{ matrix.os }}
+          path: samba-${{ matrix.os }}.tar.gz
