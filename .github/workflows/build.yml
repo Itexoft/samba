@@ -102,3 +102,28 @@ jobs:
           ./configure --without-acl-support --without-gettext --bundled-libraries=ALL
 
           make JOBS="$(sysctl -n hw.ncpu)"
+
+      - name: Archive
+        id: pack
+        shell: bash
+        run: |
+          set -e
+          mkdir -p out
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            find bin -type f -perm -111 -print0 | xargs -0 -I{} cp {} out/ || true
+          else
+            find bin -type f -executable -print0 | xargs -0 -I{} cp {} out/ || true
+          fi
+          if [ -n "$(ls -A out 2>/dev/null)" ]; then
+            tar -czf "samba-${{ matrix.os }}.tar.gz" -C out .
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.pack.outputs.created == 'true' }}
+        with:
+          name: samba-${{ matrix.os }}
+          path: samba-${{ matrix.os }}.tar.gz
+          if-no-files-found: error
