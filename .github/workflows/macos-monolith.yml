@@ -109,61 +109,73 @@ jobs:
           mkdir -p libs
           : > libs/.origmap
 
-          bundle() {
+          rpaths_of() { otool -l "$1" | awk '/LC_RPATH/{getline; getline; print $2}'; }
+          deps_list() { otool -L "$1" | awk '/^\t/ {print $1}' | grep -Ev '^(/usr/lib|/System/Library)'; }
+          map_add() { echo "$1|$2" >> libs/.origmap; }
+          map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' libs/.origmap; }
+
+          resolve_dep() {
+            ref="$1"; dep="$2"
+            case "$dep" in
+              @loader_path/*)
+                d="$(cd "$(dirname "$ref")" && pwd -P)"
+                f="$d/${dep#@loader_path/}"
+                [ -f "$f" ] && { echo "$f"; return 0; }
+                ;;
+              @rpath/*)
+                for r in $(rpaths_of "$ref"); do
+                  case "$r" in
+                    @loader_path/*) base="$(cd "$(dirname "$ref")" && cd "${r#@loader_path/}" 2>/dev/null && pwd -P)" ;;
+                    @executable_path/*) base="$(cd "$(dirname "$ref")" && cd "${r#@executable_path/}" 2>/dev/null && pwd -P)" ;;
+                    /*) base="$r" ;;
+                    *) base="" ;;
+                  esac
+                  [ -n "$base" ] && [ -f "$base/${dep#@rpath/}" ] && { echo "$base/${dep#@rpath/}"; return 0; }
+                done
+                ;;
+              /*)
+                echo "$dep"; return 0 ;;
+            esac
+            n="$(basename "$dep")"
+            for p in "$B"/opt/*/lib "$B"/lib; do
+              [ -f "$p/$n" ] && { echo "$p/$n"; return 0; }
+            done
+            cand="$(find "$(dirname "$ref")" -name "$n" -type f 2>/dev/null | head -n 1)"
+            [ -n "$cand" ] && { echo "$cand"; return 0; }
+            return 1
+          }
+
+          fix_rpaths() {
+            tgt="$1"
+            for rp in $(rpaths_of "$tgt"); do
+              case "$rp" in /*) install_name_tool -delete_rpath "$rp" "$tgt" || true ;; esac
+            done
+          }
+
+          bundle_one() {
             prog="$1"
             src="bin/$prog"
             cp "$src" "$prog"
 
-            deps_list() { otool -L "$1" | awk '/^\t/ {print $1}' | grep -Ev '^(/usr/lib|/System/Library)'; }
-            map_add() { echo "$1|$2" >> libs/.origmap; }
-            map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' libs/.origmap; }
-            rpaths_of() { otool -l "$1" | awk '/LC_RPATH/{getline; getline; print $2}'; }
-
-            resolve_dep() {
-              ref="$1"; dep="$2"
-              case "$dep" in
-                @loader_path/*)
-                  d="$(cd "$(dirname "$ref")" && pwd -P)"
-                  f="$d/${dep#@loader_path/}"
-                  [ -f "$f" ] && { echo "$f"; return 0; }
-                  ;;
-                @rpath/*)
-                  for r in $(rpaths_of "$ref"); do
-                    case "$r" in
-                      @loader_path/*) base="$(cd "$(dirname "$ref")" && cd "${r#@loader_path/}" 2>/dev/null && pwd -P)" ;;
-                      @executable_path/*) base="$(cd "$(dirname "$ref")" && cd "${r#@executable_path/}" 2>/dev/null && pwd -P)" ;;
-                      /*) base="$r" ;;
-                      *) base="" ;;
-                    esac
-                    [ -n "$base" ] && [ -f "$base/${dep#@rpath/}" ] && { echo "$base/${dep#@rpath/}"; return 0; }
-                  done
-                  ;;
-                /*)
-                  echo "$dep"; return 0 ;;
-              esac
-              n="$(basename "$dep")"
-              for p in "$B"/opt/*/lib "$B"/lib; do
-                [ -f "$p/$n" ] && { echo "$p/$n"; return 0; }
-              done
-              cand="$(find "$(dirname "$ref")" -name "$n" -type f 2>/dev/null | head -n 1)"
-              [ -n "$cand" ] && { echo "$cand"; return 0; }
-              return 1
-            }
-
             initial="$(deps_list "$src" || true)"
             queue=""
+
             for dep in $initial; do
               abs="$(resolve_dep "$src" "$dep")" || continue
               base="$(basename "$abs")"
-              depbase="$dep"
-              case "$dep" in @rpath/*) depbase="$(basename "${dep#@rpath/}")" ;; esac
               if [ ! -f "libs/$base" ]; then
                 cp -pRL "$abs" "libs/$base"
                 install_name_tool -id "@rpath/$base" "libs/$base" || true
+                fix_rpaths "libs/$base"
                 map_add "$base" "$abs"
                 queue="$queue $base"
               fi
-              if [ "$depbase" != "$base" ] && [ ! -e "libs/$depbase" ]; then ln -sf "$base" "libs/$depbase"; fi
+              case "$dep" in
+                @rpath/*)
+                  want="$(basename "${dep#@rpath/}")"
+                  [ "$want" != "$base" ] && [ ! -e "libs/$want" ] && ln -sf "$base" "libs/$want" || true
+                  ;;
+              esac
             done
 
             while [ -n "$queue" ]; do
@@ -173,15 +185,19 @@ jobs:
                 for sub in $(deps_list "libs/$b" || true); do
                   sabs="$(resolve_dep "$orig" "$sub")" || continue
                   sbase="$(basename "$sabs")"
-                  sdepbase="$sub"
-                  case "$sub" in @rpath/*) sdepbase="$(basename "${sub#@rpath/}")" ;; esac
                   if [ ! -f "libs/$sbase" ]; then
                     cp -pRL "$sabs" "libs/$sbase"
                     install_name_tool -id "@rpath/$sbase" "libs/$sbase" || true
+                    fix_rpaths "libs/$sbase"
                     map_add "$sbase" "$sabs"
                     next="$next $sbase"
                   fi
-                  if [ "$sdepbase" != "$sbase" ] && [ ! -e "libs/$sdepbase" ]; then ln -sf "$sbase" "libs/$sdepbase"; fi
+                  case "$sub" in
+                    @rpath/*)
+                      swant="$(basename "${sub#@rpath/}")"
+                      [ "$swant" != "$sbase" ] && [ ! -e "libs/$swant" ] && ln -sf "$sbase" "libs/$swant" || true
+                      ;;
+                  esac
                   install_name_tool -change "$sub" "@rpath/$sbase" "libs/$b" || true
                 done
               done
@@ -194,7 +210,7 @@ jobs:
               install_name_tool -change "$dep" "@rpath/$base" "$prog" || true
             done
 
-            for rp in $(rpaths_of "$prog"); do case "$rp" in /*) install_name_tool -delete_rpath "$rp" "$prog" || true ;; esac; done
+            fix_rpaths "$prog"
             install_name_tool -add_rpath "@executable_path/libs" "$prog" || true
 
             /usr/bin/codesign --force -s - --timestamp=none "$prog"
@@ -207,14 +223,15 @@ jobs:
           }
 
           for p in net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit; do
-            bundle "$p"
+            bundle_one "$p"
           done
 
           for f in $(find bin -type f -name 'libsecrets3*-samba*.dylib' 2>/dev/null); do
             base="$(basename "$f")"
             [ -f "libs/$base" ] || cp -pRL "$f" "libs/$base"
             install_name_tool -id "@rpath/$base" "libs/$base" || true
-            [ -e "libs/libsecrets3-private-samba.dylib" ] || ln -sf "$base" "libs/libsecrets3-private-samba.dylib"
+            fix_rpaths "libs/$base"
+            [ -e "libs/libsecrets3-private-samba.dylib" ] || ln -sf "$base" "libs/libsecrets3-private-samba.dylib" || true
           done
 
           find libs -type f -name '*.dylib' -print0 | xargs -0 -I{} /usr/bin/codesign --force -s - --timestamp=none {}
