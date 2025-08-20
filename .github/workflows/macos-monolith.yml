@@ -128,9 +128,7 @@ jobs:
                         *) d="" ;;
                       esac
                       [ -n "$d" ] && [ -f "$d/${dep#@rpath/}" ] && { echo "$d/${dep#@rpath/}"; return 0; }
-                    done <<EOR
-                      $(otool -l "$ref" | awk '/LC_RPATH/{getline; print $2}')
-                      EOR
+                    done <<< "$(otool -l \"$ref\" | awk '/LC_RPATH/{getline; print $2}')"
                     ;;
                   /*) echo "$dep"; return 0 ;;
                 esac
