@@ -1,5 +1,6 @@
+---
 name: macos-monolith
-on:
+"on":
   workflow_dispatch:
 
 jobs:
@@ -168,7 +169,7 @@ jobs:
             for dep in $initial; do
               abs="$(resolve_dep "$src" "$dep")" || continue
               base="$(basename "$abs")"
-              install_name_tool -change "$dep" "@rpath/$base" "$prog" || true
+              install_name_tool -change "$abs" "@rpath/$base" "$prog" || true
             done
             install_name_tool -add_rpath "@executable_path/../libs" "$prog" || true
             /usr/bin/codesign --force -s - --timestamp=none "$prog"
