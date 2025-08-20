@@ -106,13 +106,14 @@ jobs:
         run: |
           set -euo pipefail
           B=$(brew --prefix)
-          mkdir -p libs
-          : > libs/.origmap
+          DST=lib
+          mkdir -p "$DST"
+          : > "$DST/.origmap"
 
           rpaths_of() { otool -l "$1" | awk '/LC_RPATH/{getline; getline; print $2}'; }
           deps_list() { otool -L "$1" | awk '/^\t/ {print $1}' | grep -Ev '^(/usr/lib|/System/Library)'; }
-          map_add() { echo "$1|$2" >> libs/.origmap; }
-          map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' libs/.origmap; }
+          map_add() { echo "$1|$2" >> "$DST/.origmap"; }
+          map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' "$DST/.origmap"; }
 
           resolve_dep() {
             ref="$1"; dep="$2"
@@ -140,7 +141,7 @@ jobs:
             for p in "$B"/opt/*/lib "$B"/lib; do
               [ -f "$p/$n" ] && { echo "$p/$n"; return 0; }
             done
-            cand="$(find "$(dirname "$ref")" -name "$n" -type f 2>/dev/null | head -n 1)"
+            cand="$(find "$(dirname "$ref")" -type f -name "$n" -o -name "${n%.*}*.dylib" 2>/dev/null | head -n 1 || true)"
             [ -n "$cand" ] && { echo "$cand"; return 0; }
             return 1
           }
@@ -163,17 +164,17 @@ jobs:
             for dep in $initial; do
               abs="$(resolve_dep "$src" "$dep")" || continue
               base="$(basename "$abs")"
-              if [ ! -f "libs/$base" ]; then
-                cp -pRL "$abs" "libs/$base"
-                install_name_tool -id "@rpath/$base" "libs/$base" || true
-                fix_rpaths "libs/$base"
+              if [ ! -f "$DST/$base" ]; then
+                cp -pRL "$abs" "$DST/$base"
+                install_name_tool -id "@rpath/$base" "$DST/$base" || true
+                fix_rpaths "$DST/$base"
                 map_add "$base" "$abs"
                 queue="$queue $base"
               fi
               case "$dep" in
                 @rpath/*)
                   want="$(basename "${dep#@rpath/}")"
-                  [ "$want" != "$base" ] && [ ! -e "libs/$want" ] && ln -sf "$base" "libs/$want" || true
+                  [ "$want" != "$base" ] && [ ! -e "$DST/$want" ] && ln -sf "$base" "$DST/$want" || true
                   ;;
               esac
             done
@@ -182,23 +183,23 @@ jobs:
               next=""
               for b in $queue; do
                 orig="$(map_get "$b")"
-                for sub in $(deps_list "libs/$b" || true); do
+                for sub in $(deps_list "$DST/$b" || true); do
                   sabs="$(resolve_dep "$orig" "$sub")" || continue
                   sbase="$(basename "$sabs")"
-                  if [ ! -f "libs/$sbase" ]; then
-                    cp -pRL "$sabs" "libs/$sbase"
-                    install_name_tool -id "@rpath/$sbase" "libs/$sbase" || true
-                    fix_rpaths "libs/$sbase"
+                  if [ ! -f "$DST/$sbase" ]; then
+                    cp -pRL "$sabs" "$DST/$sbase"
+                    install_name_tool -id "@rpath/$sbase" "$DST/$sbase" || true
+                    fix_rpaths "$DST/$sbase"
                     map_add "$sbase" "$sabs"
                     next="$next $sbase"
                   fi
                   case "$sub" in
                     @rpath/*)
                       swant="$(basename "${sub#@rpath/}")"
-                      [ "$swant" != "$sbase" ] && [ ! -e "libs/$swant" ] && ln -sf "$sbase" "libs/$swant" || true
+                      [ "$swant" != "$sbase" ] && [ ! -e "$DST/$swant" ] && ln -sf "$sbase" "$DST/$swant" || true
                       ;;
                   esac
-                  install_name_tool -change "$sub" "@rpath/$sbase" "libs/$b" || true
+                  install_name_tool -change "$sub" "@rpath/$sbase" "$DST/$b" || true
                 done
               done
               queue="$(printf '%s\n' $next | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ')"
@@ -211,8 +212,8 @@ jobs:
             done
 
             fix_rpaths "$prog"
+            install_name_tool -add_rpath "@executable_path/$DST" "$prog" || true
             install_name_tool -add_rpath "@executable_path/libs" "$prog" || true
-            install_name_tool -add_rpath "@executable_path/lib" "$prog" || true
 
             /usr/bin/codesign --force -s - --timestamp=none "$prog"
             /usr/bin/codesign --verify --deep --strict "$prog"
@@ -226,17 +227,17 @@ jobs:
           ensure_dlopen_libs() {
             prog="$1"
             for name in $(strings "$prog" | grep -Eo 'lib[^/[:space:]]+\.dylib' | sort -u); do
-              [ -e "libs/$name" ] && continue
+              [ -e "$DST/$name" ] && continue
               found=""
               for dir in bin bin/shared bin/shared/private bin/default .; do
                 [ -z "$found" ] && [ -d "$dir" ] && found="$(find "$dir" -type f -name "$name" -o -name "${name%.*}*.dylib" 2>/dev/null | head -n 1 || true)"
               done
               [ -z "$found" ] && continue
               base="$(basename "$found")"
-              [ -f "libs/$base" ] || cp -pRL "$found" "libs/$base"
-              install_name_tool -id "@rpath/$base" "libs/$base" || true
-              fix_rpaths "libs/$base"
-              [ "$base" = "$name" ] || ln -sf "$base" "libs/$name" || true
+              [ -f "$DST/$base" ] || cp -pRL "$found" "$DST/$base"
+              install_name_tool -id "@rpath/$base" "$DST/$base" || true
+              fix_rpaths "$DST/$base"
+              [ "$base" = "$name" ] || ln -sf "$base" "$DST/$name" || true
             done
           }
 
@@ -244,27 +245,32 @@ jobs:
             bundle_one "$p"
           done
 
-          for f in $(find bin -type f -name 'libsecrets*.*samba*.dylib' 2>/dev/null); do
+          for f in $(find bin -type f -name 'lib*private-samba*.dylib' -o -name 'libsecrets*.*samba*.dylib' 2>/dev/null); do
             base="$(basename "$f")"
-            [ -f "libs/$base" ] || cp -pRL "$f" "libs/$base"
-            install_name_tool -id "@rpath/$base" "libs/$base" || true
-            fix_rpaths "libs/$base"
-            [ -e "libs/libsecrets3-private-samba.dylib" ] || ln -sf "$base" "libs/libsecrets3-private-samba.dylib" || true
+            [ -f "$DST/$base" ] || cp -pRL "$f" "$DST/$base"
+            install_name_tool -id "@rpath/$base" "$DST/$base" || true
+            fix_rpaths "$DST/$base"
           done
+          [ -e "$DST/libsecrets3-private-samba.dylib" ] || {
+            c="$(ls "$DST"/libsecrets3-private-samba*.dylib 2>/dev/null | head -n 1 || true)"
+            [ -n "$c" ] && ln -sf "$(basename "$c")" "$DST/libsecrets3-private-samba.dylib" || true
+          }
 
           for p in smbclient tdbtool tdbbackup; do
             ensure_dlopen_libs "$p"
           done
 
-          [ -e lib ] || ln -s libs lib
+          [ -e libs ] || ln -s "$DST" libs
 
-          find libs -type f -name '*.dylib' -print0 | xargs -0 -I{} /usr/bin/codesign --force -s - --timestamp=none {}
+          find . -maxdepth 1 -type f -name 'lib*.dylib' -exec mv -n '{}' "$DST/" \;
+
+          find "$DST" -type f -name '*.dylib' -print0 | xargs -0 -I{} /usr/bin/codesign --force -s - --timestamp=none {}
 
       - name: Package monolith
         if: runner.os == 'macOS'
         run: |
           tar -czf macos-monolith.tar.gz \
-            libs net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd \
+            lib net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd \
             smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit
       - name: Upload config logs
         if: always() && runner.os == 'macOS'
