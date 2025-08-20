@@ -112,7 +112,6 @@ jobs:
             prog="$1"
             src="bin/$prog"
             cp "$src" "$prog"
-
             deps_list() { otool -L "$1" | awk '/^\t/ {print $1}' | grep -Ev '^(/usr/lib|/System/Library)'; }
             map_add() { echo "$1|$2" >> libs/.origmap; }
             map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' libs/.origmap; }
@@ -125,20 +124,18 @@ jobs:
                   [ -f "$f" ] && { echo "$f"; return 0; }
                   ;;
                 @rpath/*)
-                  while IFS= read -r r; do
+                  rpaths="$(otool -l "$ref" | awk '/LC_RPATH/{getline; getline; print $2}')"
+                  printf '%s\n' "$rpaths" | while IFS= read -r r; do
                     case "$r" in
                       @loader_path/*) d="$(cd "$(dirname "$ref")" && cd "${r#@loader_path/}" 2>/dev/null && pwd -P)" ;;
                       @executable_path/*) d="$(cd "$(dirname "$ref")" && cd "${r#@executable_path/}" 2>/dev/null && pwd -P)" ;;
                       /*) d="$r" ;;
                       *) d="" ;;
                     esac
-                    [ -n "$d" ] && [ -f "$d/${dep#@rpath/}" ] && { echo "$d/${dep#@rpath/}"; return 0; }
-                  done <<EOF
-          $(otool -l "$ref" | awk '/LC_RPATH/{getline; print $2}')
-          EOF
+                    if [ -n "$d" ] && [ -f "$d/${dep#@rpath/}" ]; then echo "$d/${dep#@rpath/}"; return 0; fi
+                  done
                   ;;
-                /*)
-                  echo "$dep"; return 0 ;;
+                /*) echo "$dep"; return 0 ;;
               esac
               n="$(basename "$dep")"
               for p in "$B"/opt/*/lib "$B"/lib; do
@@ -154,12 +151,14 @@ jobs:
             for dep in $initial; do
               abs="$(resolve_dep "$src" "$dep")" || continue
               base="$(basename "$abs")"
+              depname="${dep#@rpath/}"
               if [ ! -f "libs/$base" ]; then
                 cp -pRL "$abs" "libs/$base"
                 install_name_tool -id "@rpath/$base" "libs/$base" || true
                 map_add "$base" "$abs"
                 queue="$queue $base"
               fi
+              if [ "$depname" != "$base" ] && [ ! -e "libs/$depname" ]; then ln -sf "$base" "libs/$depname"; fi
             done
 
             while [ -n "$queue" ]; do
@@ -169,12 +168,14 @@ jobs:
                 for sub in $(deps_list "libs/$b" || true); do
                   sabs="$(resolve_dep "$orig" "$sub")" || continue
                   sbase="$(basename "$sabs")"
+                  sdep="${sub#@rpath/}"
                   if [ ! -f "libs/$sbase" ]; then
                     cp -pRL "$sabs" "libs/$sbase"
                     install_name_tool -id "@rpath/$sbase" "libs/$sbase" || true
                     map_add "$sbase" "$sabs"
                     next="$next $sbase"
                   fi
+                  if [ "$sdep" != "$sbase" ] && [ ! -e "libs/$sdep" ]; then ln -sf "$sbase" "libs/$sdep"; fi
                   install_name_tool -change "$sub" "@rpath/$sbase" "libs/$b" || true
                 done
               done
@@ -187,7 +188,11 @@ jobs:
               install_name_tool -change "$dep" "@rpath/$base" "$prog" || true
             done
 
+            for rp in $(otool -l "$prog" | awk '/LC_RPATH/{getline; getline; print $2}'); do
+              case "$rp" in /*) install_name_tool -delete_rpath "$rp" "$prog" || true ;; esac
+            done
             install_name_tool -add_rpath "@executable_path/libs" "$prog" || true
+
             /usr/bin/codesign --force -s - --timestamp=none "$prog"
             /usr/bin/codesign --verify --deep --strict "$prog"
             if otool -L "$prog" | grep -q '/opt/homebrew'; then
@@ -196,10 +201,20 @@ jobs:
             fi
             otool -L "$prog"
           }
+
           for p in net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit; do
             bundle "$p"
           done
+
+          for f in $(find bin -type f -name 'libsecrets3*-samba*.dylib' 2>/dev/null); do
+            base="$(basename "$f")"
+            [ -f "libs/$base" ] || cp -pRL "$f" "libs/$base"
+            install_name_tool -id "@rpath/$base" "libs/$base" || true
+            [ -e "libs/libsecrets3-private-samba.dylib" ] || ln -sf "$base" "libs/libsecrets3-private-samba.dylib"
+          done
+
           find libs -type f -name '*.dylib' -print0 | xargs -0 -I{} /usr/bin/codesign --force -s - --timestamp=none {}
+
       - name: Package monolith
         if: runner.os == 'macOS'
         run: |
