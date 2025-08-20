@@ -20,7 +20,9 @@ jobs:
             brew list "$f" >/dev/null 2>&1 || brew install "$f"
             if [ -n "$(brew outdated -q "$f")" ]; then brew upgrade "$f"; fi
           done
-          for pkg in gpgmepy gnupg gnutls popt python pkg-config openldap lmdb jansson libtirpc flex bison cups libarchive dbus glib autoconf automake libtool git gdb perl cpanminus swig krb5 readline libxcrypt icu4c utf8proc cmocka openssl@3 python-markdown; do
+          for pkg in gpgmepy gnupg gnutls popt python pkg-config openldap lmdb jansson libtirpc flex bison cups libarchive dbus glib \
+            autoconf automake libtool git gdb perl cpanminus swig krb5 readline libxcrypt icu4c utf8proc cmocka openssl@3 \
+            python-markdown; do
             brew list "$pkg" >/dev/null 2>&1 || brew install "$pkg"
           done
           cpanm Parse::Yapp
@@ -106,80 +108,82 @@ jobs:
           B=$(brew --prefix)
           mkdir -p libs
           : > libs/.origmap
-          bundle() {
-            prog="$1"
-            src="bin/$prog"
-            cp "$src" "$prog"
-            deps_list() { otool -L "$1" | awk '/^\t/ {print $1}' | grep -Ev '^(/usr/lib|/System/Library)'; }
-            map_add() { echo "$1|$2" >> libs/.origmap; }
-            map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' libs/.origmap; }
-            resolve_dep() {
-              ref="$1"; dep="$2"
-              case "$dep" in
-                @loader_path/*) echo "$(dirname "$ref")/${dep#@loader_path/}"; return 0 ;;
-                @rpath/*)
-                  for r in $(otool -l "$ref" | awk '/LC_RPATH/{getline; print $2}'); do
-                    case "$r" in
-                      @loader_path/*) d="$(dirname "$ref")/${r#@loader_path/}" ;;
-                      @executable_path/*) d="$(pwd)/${r#@executable_path/}" ;;
-                      /*) d="$r" ;;
-                      *) d="" ;;
-                    esac
-                    [ -n "$d" ] && [ -f "$d/${dep#@rpath/}" ] && { echo "$d/${dep#@rpath/}"; return 0; }
-                  done
-                  ;;
-                /*) echo "$dep"; return 0 ;;
-              esac
-              n="$(basename "$dep")"
-              for p in "$B"/opt/*/lib "$B"/lib; do
-                [ -f "$p/$n" ] && { echo "$p/$n"; return 0; }
-              done
-              return 1
-            }
-            initial="$(deps_list "$src" || true)"
-            queue=""
-            for dep in $initial; do
-              abs="$(resolve_dep "$src" "$dep")" || continue
-              base="$(basename "$abs")"
-              if [ ! -f "libs/$base" ]; then
-                cp -pRL "$abs" "libs/$base"
-                install_name_tool -id "@rpath/$base" "libs/$base" || true
-                map_add "$base" "$abs"
-                queue="$queue $base"
-              fi
-            done
-            while [ -n "$queue" ]; do
-              next=""
-              for b in $queue; do
-                orig="$(map_get "$b")"
-                for sub in $(deps_list "libs/$b" || true); do
-                  sabs="$(resolve_dep "$orig" "$sub")" || continue
-                  sbase="$(basename "$sabs")"
-                  if [ ! -f "libs/$sbase" ]; then
-                    cp -pRL "$sabs" "libs/$sbase"
-                    install_name_tool -id "@rpath/$sbase" "libs/$sbase" || true
-                    map_add "$sbase" "$sabs"
-                    next="$next $sbase"
-                  fi
-                  install_name_tool -change "$sabs" "@rpath/$sbase" "libs/$b" || true
+            bundle() {
+              prog="$1"
+              src="bin/$prog"
+              cp "$src" "$prog"
+              deps_list() { otool -L "$1" | awk '/^\t/ {print $1}' | grep -Ev '^(/usr/lib|/System/Library)'; }
+              map_add() { echo "$1|$2" >> libs/.origmap; }
+              map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' libs/.origmap; }
+              resolve_dep() {
+                ref="$1"; dep="$2"
+                case "$dep" in
+                  @loader_path/*) echo "$(dirname "$ref")/${dep#@loader_path/}"; return 0 ;;
+                  @rpath/*)
+                    while IFS= read -r r; do
+                      case "$r" in
+                        @loader_path/*) d="$(dirname "$ref")/${r#@loader_path/}" ;;
+                        @executable_path/*) d="$(dirname "$ref")/${r#@executable_path/}" ;;
+                        /*) d="$r" ;;
+                        *) d="" ;;
+                      esac
+                      [ -n "$d" ] && [ -f "$d/${dep#@rpath/}" ] && { echo "$d/${dep#@rpath/}"; return 0; }
+                    done <<EOR
+                      $(otool -l "$ref" | awk '/LC_RPATH/{getline; print $2}')
+                      EOR
+                    ;;
+                  /*) echo "$dep"; return 0 ;;
+                esac
+                n="$(basename "$dep")"
+                for p in "$B"/opt/*/lib "$B"/lib; do
+                  [ -f "$p/$n" ] && { echo "$p/$n"; return 0; }
                 done
+                return 1
+              }
+              initial="$(deps_list "$src" || true)"
+              queue=""
+              for dep in $initial; do
+                abs="$(resolve_dep "$src" "$dep")" || continue
+                base="$(basename "$abs")"
+                if [ ! -f "libs/$base" ]; then
+                  cp -pRL "$abs" "libs/$base"
+                  install_name_tool -id "@rpath/$base" "libs/$base" || true
+                  map_add "$base" "$abs"
+                  queue="$queue $base"
+                fi
               done
-              queue="$(printf '%s\n' $next | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ')"
-            done
-            for dep in $initial; do
-              abs="$(resolve_dep "$src" "$dep")" || continue
-              base="$(basename "$abs")"
-              install_name_tool -change "$abs" "@rpath/$base" "$prog" || true
-            done
-            install_name_tool -add_rpath "@executable_path/../libs" "$prog" || true
-            /usr/bin/codesign --force -s - --timestamp=none "$prog"
-            /usr/bin/codesign --verify --deep --strict "$prog"
-            if otool -L "$prog" | grep -q '/opt/homebrew'; then
+              while [ -n "$queue" ]; do
+                next=""
+                for b in $queue; do
+                  orig="$(map_get "$b")"
+                  for sub in $(deps_list "libs/$b" || true); do
+                    sabs="$(resolve_dep "$orig" "$sub")" || continue
+                    sbase="$(basename "$sabs")"
+                    if [ ! -f "libs/$sbase" ]; then
+                      cp -pRL "$sabs" "libs/$sbase"
+                      install_name_tool -id "@rpath/$sbase" "libs/$sbase" || true
+                      map_add "$sbase" "$sabs"
+                      next="$next $sbase"
+                    fi
+                    install_name_tool -change "$sub" "@rpath/$sbase" "libs/$b" || true
+                  done
+                done
+                queue="$(printf '%s\n' $next | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ')"
+              done
+              for dep in $initial; do
+                abs="$(resolve_dep "$src" "$dep")" || continue
+                base="$(basename "$abs")"
+                install_name_tool -change "$dep" "@rpath/$base" "$prog" || true
+              done
+              install_name_tool -add_rpath "@executable_path/../libs" "$prog" || true
+              /usr/bin/codesign --force -s - --timestamp=none "$prog"
+              /usr/bin/codesign --verify --deep --strict "$prog"
+              if otool -L "$prog" | grep -q '/opt/homebrew'; then
+                otool -L "$prog"
+                exit 1
+              fi
               otool -L "$prog"
-              exit 1
-            fi
-            otool -L "$prog"
-          }
+            }
           for p in net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit; do
             bundle "$p"
           done
