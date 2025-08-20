@@ -103,15 +103,14 @@ jobs:
         run: |
           set -euo pipefail
           B=$(brew --prefix)
+          mkdir -p libs
+          : > libs/.origmap
           bundle() {
             prog="$1"
-            mkdir -p "out-$prog" "out-$prog/lib"
-            : > "out-$prog/lib/.origmap"
-            cp "bin/$prog" "out-$prog/$prog"
-
+            cp "bin/$prog" "$prog"
             deps_list() { otool -L "$1" | awk '/^\t/ {print $1}' | grep -Ev '^(/usr/lib|/System/Library)'; }
-            map_add() { echo "$1|$2" >> "out-$prog/lib/.origmap"; }
-            map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' "out-$prog/lib/.origmap"; }
+            map_add() { echo "$1|$2" >> libs/.origmap; }
+            map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' libs/.origmap; }
             resolve_dep() {
               ref="$1"; dep="$2"
               case "$dep" in
@@ -120,7 +119,7 @@ jobs:
                   for r in $(otool -l "$ref" | awk '/LC_RPATH/{getline; print $2}'); do
                     case "$r" in
                       @loader_path/*) d="$(dirname "$ref")/${r#@loader_path/}" ;;
-                      @executable_path/*) d="$(pwd)/out-$prog/${r#@executable_path/}" ;;
+                      @executable_path/*) d="$(pwd)/${r#@executable_path/}" ;;
                       /*) d="$r" ;;
                       *) d="" ;;
                     esac
@@ -135,63 +134,60 @@ jobs:
               done
               return 1
             }
-
-            initial="$(deps_list out-$prog/$prog || true)"
+            initial="$(deps_list "$prog" || true)"
             queue=""
             for dep in $initial; do
-              abs="$(resolve_dep out-$prog/$prog "$dep")" || continue
+              abs="$(resolve_dep "$prog" "$dep")" || continue
               base="$(basename "$abs")"
-              if [ ! -f "out-$prog/lib/$base" ]; then
-                cp -pRL "$abs" "out-$prog/lib/$base"
-                install_name_tool -id "@rpath/$base" "out-$prog/lib/$base" || true
+              if [ ! -f "libs/$base" ]; then
+                cp -pRL "$abs" "libs/$base"
+                install_name_tool -id "@rpath/$base" "libs/$base" || true
                 map_add "$base" "$abs"
                 queue="$queue $base"
               fi
             done
-
             while [ -n "$queue" ]; do
               next=""
               for b in $queue; do
                 orig="$(map_get "$b")"
-                for sub in $(deps_list "$orig" || true); do
+                for sub in $(deps_list "libs/$b" || true); do
                   sabs="$(resolve_dep "$orig" "$sub")" || continue
                   sbase="$(basename "$sabs")"
-                  if [ ! -f "out-$prog/lib/$sbase" ]; then
-                    cp -pRL "$sabs" "out-$prog/lib/$sbase"
-                    install_name_tool -id "@rpath/$sbase" "out-$prog/lib/$sbase" || true
+                  if [ ! -f "libs/$sbase" ]; then
+                    cp -pRL "$sabs" "libs/$sbase"
+                    install_name_tool -id "@rpath/$sbase" "libs/$sbase" || true
                     map_add "$sbase" "$sabs"
                     next="$next $sbase"
                   fi
-                  install_name_tool -change "$sabs" "@rpath/$sbase" "out-$prog/lib/$b" || true
+                  install_name_tool -change "$sabs" "@rpath/$sbase" "libs/$b" || true
                 done
               done
               queue="$(printf '%s\n' $next | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ')"
             done
-
             for dep in $initial; do
-              abs="$(resolve_dep out-$prog/$prog "$dep")" || continue
+              abs="$(resolve_dep "$prog" "$dep")" || continue
               base="$(basename "$abs")"
-              install_name_tool -change "$abs" "@rpath/$base" out-$prog/$prog || true
+              install_name_tool -change "$abs" "@rpath/$base" "$prog" || true
             done
-            install_name_tool -add_rpath "@executable_path/lib" out-$prog/$prog || true
-
-            /usr/bin/codesign --force -s - --timestamp=none out-$prog/$prog
-            find "out-$prog/lib" -type f -name '*.dylib' -print0 | xargs -0 -I{} /usr/bin/codesign --force -s - --timestamp=none {}
-            /usr/bin/codesign --verify --deep --strict out-$prog/$prog
-
-            if otool -L out-$prog/$prog | grep -q '/opt/homebrew'; then
-              otool -L out-$prog/$prog
+            install_name_tool -add_rpath "@executable_path/../libs" "$prog" || true
+            /usr/bin/codesign --force -s - --timestamp=none "$prog"
+            /usr/bin/codesign --verify --deep --strict "$prog"
+            if otool -L "$prog" | grep -q '/opt/homebrew'; then
+              otool -L "$prog"
               exit 1
             fi
-            otool -L out-$prog/$prog
-
-            tar -czf "$prog-macos-monolith.tar.gz" -C "out-$prog" .
+            otool -L "$prog"
           }
-
-          for p in net rpcclient smbcacls smbcontrol smbcquotas smbd smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit; do
+          for p in net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit; do
             bundle "$p"
           done
-
+          find libs -type f -name '*.dylib' -print0 | xargs -0 -I{} /usr/bin/codesign --force -s - --timestamp=none {}
+      - name: Package monolith
+        if: runner.os == 'macOS'
+        run: |
+          tar -czf macos-monolith.tar.gz \
+            libs net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd \
+            smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit
       - name: Upload config logs
         if: always() && runner.os == 'macOS'
         uses: actions/upload-artifact@v4
@@ -200,114 +196,10 @@ jobs:
           path: bin/config.log
           if-no-files-found: warn
 
-      - name: Upload net
+      - name: Upload monolith
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: net-macos-monolith
-          path: net-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload rpcclient
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: rpcclient-macos-monolith
-          path: rpcclient-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload smbcacls
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smbcacls-macos-monolith
-          path: smbcacls-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload smbcontrol
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smbcontrol-macos-monolith
-          path: smbcontrol-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload smbcquotas
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smbcquotas-macos-monolith
-          path: smbcquotas-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload smbd
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smbd-macos-monolith
-          path: smbd-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload smbget
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smbget-macos-monolith
-          path: smbget-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload smbpasswd
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smbpasswd-macos-monolith
-          path: smbpasswd-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload smbstatus
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smbstatus-macos-monolith
-          path: smbstatus-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload smbtree
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smbtree-macos-monolith
-          path: smbtree-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload tdbbackup
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: tdbbackup-macos-monolith
-          path: tdbbackup-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload tdbtool
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: tdbtool-macos-monolith
-          path: tdbtool-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload testparm
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: testparm-macos-monolith
-          path: testparm-macos-monolith.tar.gz
-          if-no-files-found: error
-
-      - name: Upload pdbedit
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: pdbedit-macos-monolith
-          path: pdbedit-macos-monolith.tar.gz
+          name: macos-monolith
+          path: macos-monolith.tar.gz
           if-no-files-found: error
