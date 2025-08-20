@@ -34,15 +34,28 @@ jobs:
             python3-markdown python3-dnspython python3-pyasn1 python3-setproctitle \
             python3-requests libparse-yapp-perl xfslibs-dev glusterfs-common \
             libcephfs-dev libtracker-sparql-3.0-dev build-essential debhelper \
-            docbook-xml docbook-xsl libkeyutils-dev xz-utils libnsl-dev libtirpc-dev
+            docbook-xml docbook-xsl libkeyutils-dev xz-utils libnsl-dev libtirpc-dev \
+            fuse3 fuse libfuse2
           pkg-config --modversion gpgme
           python3 -c "import gpg; print('gpg py ok')"
+
+      - name: FUSE device
+        if: runner.os == 'Linux'
+        run: |
+          sudo modprobe fuse || true
 
       - name: Linux build
         if: runner.os == 'Linux'
         run: |
           ./configure --without-acl-support --without-gettext --bundled-libraries=ALL
           make -j$(nproc)
+
+      - name: Linux bundle
+        if: runner.os == 'Linux'
+        run: |
+          curl -L https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -o linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          ./linuxdeploy-x86_64.AppImage --appimage-version
 
       - name: macOS deps + build
         if: runner.os == 'macOS'
