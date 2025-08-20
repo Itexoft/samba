@@ -212,6 +212,7 @@ jobs:
 
             fix_rpaths "$prog"
             install_name_tool -add_rpath "@executable_path/libs" "$prog" || true
+            install_name_tool -add_rpath "@executable_path/lib" "$prog" || true
 
             /usr/bin/codesign --force -s - --timestamp=none "$prog"
             /usr/bin/codesign --verify --deep --strict "$prog"
@@ -222,17 +223,40 @@ jobs:
             otool -L "$prog"
           }
 
+          ensure_dlopen_libs() {
+            prog="$1"
+            for name in $(strings "$prog" | grep -Eo 'lib[^/[:space:]]+\.dylib' | sort -u); do
+              [ -e "libs/$name" ] && continue
+              found=""
+              for dir in bin bin/shared bin/shared/private bin/default .; do
+                [ -z "$found" ] && [ -d "$dir" ] && found="$(find "$dir" -type f -name "$name" -o -name "${name%.*}*.dylib" 2>/dev/null | head -n 1 || true)"
+              done
+              [ -z "$found" ] && continue
+              base="$(basename "$found")"
+              [ -f "libs/$base" ] || cp -pRL "$found" "libs/$base"
+              install_name_tool -id "@rpath/$base" "libs/$base" || true
+              fix_rpaths "libs/$base"
+              [ "$base" = "$name" ] || ln -sf "$base" "libs/$name" || true
+            done
+          }
+
           for p in net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit; do
             bundle_one "$p"
           done
 
-          for f in $(find bin -type f -name 'libsecrets3*-samba*.dylib' 2>/dev/null); do
+          for f in $(find bin -type f -name 'libsecrets*.*samba*.dylib' 2>/dev/null); do
             base="$(basename "$f")"
             [ -f "libs/$base" ] || cp -pRL "$f" "libs/$base"
             install_name_tool -id "@rpath/$base" "libs/$base" || true
             fix_rpaths "libs/$base"
             [ -e "libs/libsecrets3-private-samba.dylib" ] || ln -sf "$base" "libs/libsecrets3-private-samba.dylib" || true
           done
+
+          for p in smbclient tdbtool tdbbackup; do
+            ensure_dlopen_libs "$p"
+          done
+
+          [ -e lib ] || ln -s libs lib
 
           find libs -type f -name '*.dylib' -print0 | xargs -0 -I{} /usr/bin/codesign --force -s - --timestamp=none {}
 
