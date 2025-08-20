@@ -107,7 +107,8 @@ jobs:
           : > libs/.origmap
           bundle() {
             prog="$1"
-            cp "bin/$prog" "$prog"
+            src="bin/$prog"
+            cp "$src" "$prog"
             deps_list() { otool -L "$1" | awk '/^\t/ {print $1}' | grep -Ev '^(/usr/lib|/System/Library)'; }
             map_add() { echo "$1|$2" >> libs/.origmap; }
             map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' libs/.origmap; }
@@ -134,10 +135,10 @@ jobs:
               done
               return 1
             }
-            initial="$(deps_list "$prog" || true)"
+            initial="$(deps_list "$src" || true)"
             queue=""
             for dep in $initial; do
-              abs="$(resolve_dep "$prog" "$dep")" || continue
+              abs="$(resolve_dep "$src" "$dep")" || continue
               base="$(basename "$abs")"
               if [ ! -f "libs/$base" ]; then
                 cp -pRL "$abs" "libs/$base"
@@ -165,9 +166,9 @@ jobs:
               queue="$(printf '%s\n' $next | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ')"
             done
             for dep in $initial; do
-              abs="$(resolve_dep "$prog" "$dep")" || continue
+              abs="$(resolve_dep "$src" "$dep")" || continue
               base="$(basename "$abs")"
-              install_name_tool -change "$abs" "@rpath/$base" "$prog" || true
+              install_name_tool -change "$dep" "@rpath/$base" "$prog" || true
             done
             install_name_tool -add_rpath "@executable_path/../libs" "$prog" || true
             /usr/bin/codesign --force -s - --timestamp=none "$prog"
