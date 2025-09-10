@@ -911,13 +911,38 @@ bool tstream_tls_params_enabled(struct tstream_tls_params *tls_params)
 
 bool tstream_tls_params_quic_enabled(struct tstream_tls_params *tls_params)
 {
-	bool quic = false;
 #ifdef HAVE_LIBQUIC
+
 	struct tstream_tls_params_internal *tlsp = tls_params->internal;
 
-	quic = tlsp->quic;
+	return tlsp->quic;
+
+#else /* HAVE_LIBQUIC */
+
+	return false;
+
 #endif /* HAVE_LIBQUIC */
-	return quic;
+}
+
+enum tls_verify_peer_state tstream_tls_params_verify_peer(
+	struct tstream_tls_params *tls_params)
+{
+#ifdef HAVE_LIBQUIC
+
+	struct tstream_tls_params_internal *tlsp = tls_params->internal;
+
+	return tlsp->verify_peer;
+
+#else /* HAVE_LIBQUIC */
+
+	return TLS_VERIFY_PEER_NO_CHECK;
+
+#endif /* HAVE_LIBQUIC */
+}
+
+bool tstream_tls_verify_peer_trusted(enum tls_verify_peer_state verify_peer)
+{
+	return (verify_peer >= TLS_VERIFY_PEER_CA_AND_NAME);
 }
 
 const char *tstream_tls_params_peer_name(
@@ -1495,6 +1520,7 @@ int tstream_tls_connect_recv(struct tevent_req *req,
 */
 NTSTATUS tstream_tls_params_server(TALLOC_CTX *mem_ctx,
 				   const char *dns_host_name,
+				   const char * const *additional_dns_hostnames,
 				   bool enabled,
 				   const char *key_file,
 				   const char *cert_file,
@@ -1545,6 +1571,7 @@ NTSTATUS tstream_tls_params_server(TALLOC_CTX *mem_ctx,
 
 	if (!file_exist(ca_file)) {
 		tls_cert_generate(tlsp, dns_host_name,
+				  additional_dns_hostnames,
 				  key_file, cert_file, ca_file);
 	}
 
@@ -1659,7 +1686,6 @@ NTSTATUS tstream_tls_params_server(TALLOC_CTX *mem_ctx,
 }
 
 NTSTATUS tstream_tls_params_server_lpcfg(TALLOC_CTX *mem_ctx,
-					 const char *dns_host_name,
 					 struct loadparm_context *lp_ctx,
 					 struct tstream_tls_params **_tlsp)
 {
@@ -1667,7 +1693,8 @@ NTSTATUS tstream_tls_params_server_lpcfg(TALLOC_CTX *mem_ctx,
 	NTSTATUS status;
 
 	status = tstream_tls_params_server(mem_ctx,
-					   dns_host_name,
+					   lpcfg_dns_hostname(lp_ctx),
+					   lpcfg_additional_dns_hostnames(lp_ctx),
 					   lpcfg_tls_enabled(lp_ctx),
 					   lpcfg_tls_keyfile(frame, lp_ctx),
 					   lpcfg_tls_certfile(frame, lp_ctx),
@@ -2584,7 +2611,7 @@ static int tstream_ngtcp2_acked_stream_data_offset_cb(ngtcp2_conn *conn,
 		  "offset[%"PRIu64"] pushed[%"PRIu64"][%zd]\n",
 		  si->stream_id, si->writev.pushed_offset,
 		  si->writev.pushed ? si->writev.pushed->offset : 0,
-		  si->writev.pushed ? si->writev.pushed->length : -1);
+		  si->writev.pushed ? (ssize_t)si->writev.pushed->length : -1);
 
 	return 0;
 }

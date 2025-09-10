@@ -902,6 +902,7 @@ plantestsuite("samba4.blackbox.rfc2307_mapping",
 plantestsuite("samba4.blackbox.chgdcpass", "chgdcpass", [os.path.join(bbdir, "test_chgdcpass.sh"), '$SERVER', r"CHGDCPASS\$", '$REALM', '$DOMAIN', '$PREFIX/chgdcpass', "aes256-cts-hmac-sha1-96", '$PREFIX/chgdcpass', smbclient3])
 plantestsuite("samba4.blackbox.samba_upgradedns(chgdcpass:local)", "chgdcpass:local", [os.path.join(bbdir, "test_samba_upgradedns.sh"), '$SERVER', '$REALM', '$PREFIX', '$SELFTEST_PREFIX/chgdcpass'])
 plantestsuite("samba4.blackbox.net_ads", "ad_dc:client", [os.path.join(bbdir, "test_net_ads.sh"), '$DC_SERVER', '$DC_USERNAME', '$DC_PASSWORD', '$PREFIX'])
+plantestsuite("samba4.blackbox.net_ads_join", "vampire_dc:client", [os.path.join(bbdir, "test_net_ads_join_to_preferred_dc.sh"), '$DC_SERVER', '$DC_USERNAME', '$DC_PASSWORD', '$PREFIX'])
 plantestsuite("samba4.blackbox.net_offlinejoin", "ad_dc:client", [os.path.join(bbdir, "test_net_offline.sh"), '$DC_SERVER', '$DC_USERNAME', '$DC_PASSWORD', '$PREFIX'])
 plantestsuite("samba4.blackbox.client_etypes_all(ad_dc:client)", "ad_dc:client", [os.path.join(bbdir, "test_client_etypes.sh"), '$DC_SERVER', '$DC_USERNAME', '$DC_PASSWORD', '$PREFIX', 'all', '17_18_23'])
 plantestsuite("samba4.blackbox.client_etypes_legacy(ad_dc:client)", "ad_dc:client", [os.path.join(bbdir, "test_client_etypes.sh"), '$DC_SERVER', '$DC_USERNAME', '$DC_PASSWORD', '$PREFIX', 'legacy', '23'])
@@ -1194,6 +1195,7 @@ planpythontestsuite("ad_dc_default:local", "samba.tests.samba_tool.processes")
 planpythontestsuite("ad_dc_ntvfs:local", "samba.tests.samba_tool.user")
 planpythontestsuite("ad_dc_default", "samba.tests.samba_tool.user_auth_policy")
 planpythontestsuite("ad_dc_default", "samba.tests.samba_tool.user_auth_silo")
+planpythontestsuite("ad_dc_default", "samba.tests.samba_tool.user_keytrust")
 for env in ["ad_dc_default:local", "ad_dc_no_ntlm:local"]:
     planpythontestsuite(env, "samba.tests.samba_tool.user_wdigest")
 for env, nt_hash in [("ad_dc:local", True),
@@ -1257,6 +1259,7 @@ planoldpythontestsuite("ad_member", "samba.tests.gpo_member", extra_args=['-U"$U
 planoldpythontestsuite("ad_dc:local", "samba.tests.dckeytab", extra_args=['-U"$USERNAME%$PASSWORD"'])
 
 planoldpythontestsuite("ad_dc", "samba.tests.sid_strings")
+planoldpythontestsuite("ad_dc", "samba.tests.key_credential_link_samdb")
 
 # Run the import test in environments that may not have the ad-dc built
 envs = ['fileserver_smb1', 'nt4_member', 'ktest', 'nt4_dc', 'nt4_dc_smb1_done', 'nt4_dc_smb1', 'simpleserver', 'fileserver_smb1_done', 'fileserver', 'maptoguest', 'nt4_dc_schannel']
@@ -1715,6 +1718,8 @@ for env in all_fl_envs + ["schema_dc"]:
     plantestsuite_loadlist("samba4.ldap.secdesc.python(%s)" % env, env, [python, os.path.join(DSDB_PYTEST_DIR, "sec_descriptor.py"), '$SERVER', '-U"$USERNAME%$PASSWORD"', '--workgroup=$DOMAIN', '$LOADLIST', '$LISTOPT'])
     plantestsuite_loadlist("samba4.ldap.acl.python(%s)" % env, env, ["STRICT_CHECKING=0", python, os.path.join(DSDB_PYTEST_DIR, "acl.py"), '$SERVER', '-U"$USERNAME%$PASSWORD"', '--workgroup=$DOMAIN', '$LOADLIST', '$LISTOPT'])
     plantestsuite_loadlist("samba4.ldap.acl_modify.python(%s)" % env, env, ["STRICT_CHECKING=0", python, os.path.join(DSDB_PYTEST_DIR, "acl_modify.py"), '$SERVER', '-U"$USERNAME%$PASSWORD"', '--workgroup=$DOMAIN', '$LOADLIST', '$LISTOPT'])
+
+plantestsuite_loadlist("samba4.ldap.key_credential_link.python", "schema_dc", ["STRICT_CHECKING=0", python, os.path.join(DSDB_PYTEST_DIR, "key_credential_link.py"), '$SERVER', '-U"$USERNAME%$PASSWORD"', '--workgroup=$DOMAIN', '$LOADLIST', '$LISTOPT'])
 
 for env in all_fl_envs + ["schema_dc", "ad_dc_no_ntlm"]:
     if env != "fl2000dc":

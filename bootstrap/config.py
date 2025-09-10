@@ -453,7 +453,7 @@ end
 
 DEB_DISTS = {
     'debian11': {
-        'docker_image': 'debian:11',
+        'docker_image': 'debian:11-slim',
         'vagrant_box': 'debian/bullseye64',
         'replace': {
             'language-pack-en': '',   # included in locales
@@ -464,7 +464,7 @@ DEB_DISTS = {
         }
     },
     'debian11-32bit': {
-        'docker_image': 'debian:11',  # specify the platform in .gitlab-ci.yaml
+        'docker_image': 'debian:11-slim',  # specify the platform in .gitlab-ci.yaml
         'vagrant_box': 'debian/bullseye32',
         'replace': {
             'language-pack-en': '',   # included in locales
@@ -475,7 +475,7 @@ DEB_DISTS = {
         }
     },
     'debian12': {
-        'docker_image': 'debian:12',
+        'docker_image': 'debian:12-slim',
         'vagrant_box': 'debian/bookworm64',
         'replace': {
             'language-pack-en': '',   # included in locales
@@ -485,33 +485,13 @@ DEB_DISTS = {
         }
     },
     'debian12-32bit': {
-        'docker_image': 'registry-1.docker.io/i386/debian:12',
+        'docker_image': 'registry-1.docker.io/i386/debian:12-slim',
         'vagrant_box': 'debian/bookworm32',
         'replace': {
             'language-pack-en': '',   # included in locales
             'libtracker-sparql-2.0-dev': '',  # only tracker 3.x is available
             'cargo': '', # included cargo is broken
             'landscape-common': '',
-        }
-    },
-    'ubuntu1804': {
-        'docker_image': 'ubuntu:18.04',
-        'vagrant_box': 'ubuntu/bionic64',
-        'replace': {
-            'liburing-dev': '',   # not available
-            'shfmt': '',
-            'landscape-common': '',
-            'mold': '',
-        }
-    },
-    'ubuntu1804-32bit': {
-        'docker_image': 'registry-1.docker.io/i386/ubuntu:18.04',
-        'vagrant_box': 'ubuntu/bionic32',
-        'replace': {
-            'liburing-dev': '',   # not available
-            'shfmt': '',
-            'landscape-common': '',
-            'mold': '',
         }
     },
     'ubuntu2004': {
@@ -582,7 +562,7 @@ RPM_DISTS = {
         }
     },
     'fedora42': {
-        'docker_image': 'quay.io/fedora/fedora:42',
+        'docker_image': 'quay.io/fedora/fedora-minimal:42',
         'vagrant_box': 'fedora/42-cloud-base',
         'bootstrap': DNF_BOOTSTRAP,
         'replace': {
@@ -707,7 +687,7 @@ def render_vagrantfile(dists):
     This make it easier to manage the fleet, e.g:
 
     start all: vagrant up
-    start one: vagrant up ubuntu1804
+    start one: vagrant up ubuntu2404
 
     All other commands apply to above syntax, e.g.: status, destroy, provision
     """

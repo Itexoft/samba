@@ -659,8 +659,7 @@ static int streams_xattr_renameat(vfs_handle_struct *handle,
 	}
 
 	/* Don't rename if the streams are identical. */
-	if (strcasecmp_m(smb_fname_src->stream_name,
-		       smb_fname_dst->stream_name) == 0) {
+	if (strequal(smb_fname_src->stream_name, smb_fname_dst->stream_name)) {
 		goto done;
 	}
 
@@ -1011,6 +1010,11 @@ static ssize_t streams_xattr_pwrite(vfs_handle_struct *handle,
 		return SMB_VFS_NEXT_PWRITE(handle, fsp, data, n, offset);
 	}
 
+	if ((offset < 0) || ((offset + n) < n)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+
 	if (!streams_xattr_recheck(sio)) {
 		return -1;
 	}
@@ -1091,6 +1095,11 @@ static ssize_t streams_xattr_pread(vfs_handle_struct *handle,
 
 	if (sio == NULL) {
 		return SMB_VFS_NEXT_PREAD(handle, fsp, data, n, offset);
+	}
+
+	if ((offset < 0) || ((offset + n) < n)) {
+		errno = EOVERFLOW;
+		return -1;
 	}
 
 	if (!streams_xattr_recheck(sio)) {

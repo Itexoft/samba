@@ -492,15 +492,15 @@ static NTSTATUS fetch_cache_seqnum( struct winbindd_domain *domain, time_t now )
 
 	time_diff = now - domain->last_seq_check;
 	if ((int)time_diff > lp_winbind_cache_time()) {
-		DBG_DEBUG("fetch_cache_seqnum: timeout [%s][%u @ %u]\n",
+		DBG_DEBUG("fetch_cache_seqnum: timeout [%s][%u @ %jd]\n",
 			domain->name, domain->sequence_number,
-			(uint32_t)domain->last_seq_check);
+			(intmax_t)domain->last_seq_check);
 		return NT_STATUS_UNSUCCESSFUL;
 	}
 
-	DBG_DEBUG("fetch_cache_seqnum: success [%s][%u @ %u]\n",
+	DBG_DEBUG("fetch_cache_seqnum: success [%s][%u @ %jd]\n",
 		domain->name, domain->sequence_number,
-		(uint32_t)domain->last_seq_check);
+		(intmax_t)domain->last_seq_check);
 
 	return NT_STATUS_OK;
 }
@@ -532,8 +532,8 @@ bool wcache_store_seqnum(const char *domain_name, uint32_t seqnum,
 		return false;
 	}
 
-	DBG_DEBUG("wcache_store_seqnum: success [%s][%u @ %u]\n",
-		   domain_name, seqnum, (unsigned)last_seq_check);
+	DBG_DEBUG("wcache_store_seqnum: success [%s][%u @ %ju]\n",
+		   domain_name, seqnum, (uintmax_t)last_seq_check);
 
 	return true;
 }

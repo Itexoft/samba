@@ -255,21 +255,13 @@ static NTSTATUS smb_parent_load_tls_certificates(struct smbd_parent_context *par
 						 struct loadparm_context *lp_ctx)
 {
 	struct tstream_tls_params *quic_tlsp = NULL;
-	const char *dns_hostname = NULL;
 	NTSTATUS status;
 
 	if (parent == NULL) {
 		return NT_STATUS_INTERNAL_ERROR;
 	}
 
-	dns_hostname = lpcfg_dns_hostname(lp_ctx);
-	if (dns_hostname == NULL) {
-		DBG_ERR("ERROR: lpcfg_dns_hostname() failed\n");
-		return NT_STATUS_INTERNAL_ERROR;
-	}
-
 	status = tstream_tls_params_server_lpcfg(parent,
-						 dns_hostname,
 						 lp_ctx,
 						 &quic_tlsp);
 	if (!NT_STATUS_IS_OK(status)) {
@@ -1322,7 +1314,6 @@ static bool open_sockets_smbd(struct smbd_parent_context *parent,
 	const struct smb_transports *ts = &parent->transports;
 	uint8_t ti;
 	int num_interfaces = iface_count();
-	int i;
 	unsigned dns_port = 0;
 
 #ifdef HAVE_ATEXIT
@@ -1370,6 +1361,7 @@ static bool open_sockets_smbd(struct smbd_parent_context *parent,
 		   told to only bind to those interfaces. Create a
 		   socket per interface and bind to only these.
 		*/
+		int i;
 
 		/* Now open a listen socket for each of the
 		   interfaces. */
@@ -1401,6 +1393,7 @@ static bool open_sockets_smbd(struct smbd_parent_context *parent,
 #endif
 			"0.0.0.0",
 		};
+		size_t i;
 
 		for (i = 0; i < ARRAY_SIZE(sock_addrs); i++) {
 			const char *sock_tok = sock_addrs[i];
@@ -2560,8 +2553,11 @@ quic_disabled:
 		smbd_init_addrchange(NULL, ev_ctx, msg_ctx, parent);
 	}
 
-	if (!open_sockets_smbd(parent, ev_ctx, msg_ctx))
-		exit_server("open_sockets_smbd() failed");
+	if (!open_sockets_smbd(parent, ev_ctx, msg_ctx)) {
+		DBG_ERR("smbd could not bind to a socket, which can be caused "
+			"by a bad 'interfaces' line in smb.conf\n");
+		exit_server("Could not bind to any sockets\n");
+	}
 
 	TALLOC_FREE(frame);
 	/* make sure we always have a valid stackframe */

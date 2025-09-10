@@ -82,6 +82,7 @@
 #include "source3/librpc/gen_ndr/ads.h"
 #include "lib/util/time_basic.h"
 #include "libds/common/flags.h"
+#include "source3/smbd/globals.h"
 
 #ifdef HAVE_SYS_SYSCTL_H
 #include <sys/sysctl.h>
@@ -249,7 +250,7 @@ static const struct loadparm_service _sDefault =
 	.aio_read_size = 1,
 	.aio_write_size = 1,
 	.map_readonly = MAP_READONLY_NO,
-	.server_smb_encrypt = SMB_ENCRYPTION_DEFAULT,
+	._server_smb_encrypt = SMB_ENCRYPTION_DEFAULT,
 	.kernel_share_modes = false,
 	.durable_handles = true,
 	.check_parent_directory_delete_on_close = false,
@@ -1012,6 +1013,9 @@ void loadparm_s3_init_globals(struct loadparm_context *lp_ctx,
 			get_dyn_HIMMELBLAUD_HSM_PIN_PATH());
 	Globals.himmelblaud_hello_enabled = false;
 	Globals.himmelblaud_sfa_fallback = false;
+
+	Globals.server_smb_encryption_over_quic = true;
+	Globals.client_smb_encryption_over_quic = true;
 
 	/* Now put back the settings that were set with lp_set_cmdline() */
 	apply_lp_set_cmdline();
@@ -4928,4 +4932,19 @@ int lp_smb3_directory_leases(void)
 	dirleases &= lp_oplocks(GLOBAL_SECTION_SNUM);
 	dirleases &= !lp_kernel_oplocks(GLOBAL_SECTION_SNUM);
 	return dirleases;
+}
+
+int lp_server_smb_encrypt(struct smbXsrv_connection *xconn, int snum)
+{
+	enum smb_encryption_setting enc = lp__server_smb_encrypt(snum);
+
+	if (xconn->transport.trusted_quic) {
+		/*
+		 * Our transport is already encrypted in a trustworthy
+		 * way, don't request SMB level double-encryption
+		 */
+		enc = MIN(enc, SMB_ENCRYPTION_IF_REQUIRED);
+	}
+
+	return enc;
 }
