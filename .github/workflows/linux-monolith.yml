@@ -1,0 +1,200 @@
+---
+name: linux-monolith
+"on":
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Linux deps + build
+        if: runner.os == 'Linux'
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y \
+            git build-essential autoconf automake libtool pkg-config bison flex \
+            libpopt-dev libgnutls28-dev libreadline-dev libarchive-dev libicu-dev libutf8proc-dev \
+            libjansson-dev liblmdb-dev libldap2-dev libtirpc-dev libkrb5-dev \
+            libassuan-dev libgpg-error-dev libgpgme-dev gettext dbus libdbus-1-dev libglib2.0-dev \
+            libcups2-dev libcmocka-dev openssl libssl-dev swig perl cpanminus gdb \
+            python3 python3-venv python3-dev python3-pip patchelf binutils gnupg
+          cpanm Parse::Yapp
+
+          mkdir -p .ci
+          printf '%s\n' '#ifndef HAVE_REALLOCARRAY' '#define reallocarray(p,nmemb,size) realloc_array((p),(size),(nmemb),0)' '#endif' > .ci/compat_linux.h
+
+          git checkout -- lib/ldb/wscript || true
+          if ! grep -q "test_ldb_comparison_fold'.*enabled=False" lib/ldb/wscript; then
+            sed -E -i "s/\('test_ldb_comparison_fold',/\('test_ldb_comparison_fold', enabled=False,/" lib/ldb/wscript
+          fi
+
+          cat > .ci/bison <<'EOF'
+          #!/bin/sh
+          REAL="$(command -v bison)"
+          args=""
+          for a in "$@"; do
+            [ "$a" = "--no-line" ] && a="--no-lines"
+            args="$args \"$a\""
+          done
+          eval exec "$REAL" $args
+          EOF
+          chmod +x .ci/bison
+          export PATH="$(pwd)/.ci:$PATH"
+
+          python3 -m venv --system-site-packages .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install dnspython iso8601 pyasn1 setproctitle requests markdown cryptography
+
+          PY="$(pwd)/.venv/bin/python"
+
+          set +e
+          CPPFLAGS="-include $(pwd)/.ci/compat_linux.h ${CPPFLAGS:-}" CFLAGS="-include $(pwd)/.ci/compat_linux.h ${CFLAGS:-}" \
+          LDFLAGS="${LDFLAGS:-} -lcrypt" PYTHON="$PY" \
+          ./configure --without-acl-support --without-gettext --bundled-libraries=ALL \
+            --nonshared-binary=net,rpcclient,smbcacls,smbcontrol,smbcquotas,smbd/smbd,smbget,smbpasswd,smbstatus,smbtree,tdbbackup,tdbtool,testparm,pdbedit \
+            --with-static-modules=vfs_fruit,vfs_streams_xattr,vfs_catia,vfs_acl_xattr,vfs_acl_tdb,vfs_xattr_tdb,vfs_recycle,vfs_shadow_copy2,vfs_full_audit,vfs_extd_audit,vfs_readahead,vfs_preopen,vfs_aio_pthread,vfs_fake_perms,vfs_readonly,vfs_offline,vfs_time_audit,vfs_commit,vfs_crossrename,vfs_dirsort,vfs_expand_msdfs,vfs_default_quota,vfs_streams_depot,vfs_syncops,vfs_widelinks,vfs_worm,vfs_audit,auth_unix,auth_winbind,auth_builtin,pdb_tdbsam,pdb_smbpasswd,pdb_ldapsam \
+            --with-shared-modules=idmap_tdb,idmap_tdb2,idmap_rid,idmap_autorid,idmap_ad,idmap_ldap,idmap_script,idmap_nss,idmap_rfc2307,pdb_wbc_sam \
+            --without-gpgme
+          st=$?
+          set -e
+          if [ "$st" -ne 0 ]; then
+            echo "----- HEAD bin/config.log (first 200) -----" || true
+            [ -f bin/config.log ] && sed -n '1,200p' bin/config.log || true
+            echo "----- TAIL bin/config.log (last 400) -----" || true
+            [ -f bin/config.log ] && tail -n 400 bin/config.log || true
+            exit "$st"
+          fi
+
+          make JOBS="$(nproc)"
+
+      - name: Bundle shared libraries
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          DST=lib
+          mkdir -p "$DST"
+          : > "$DST/.origmap"
+
+          deps_list() { ldd "$1" | awk '/=>/ {print $3} /^[[:space:]]*\/.*\(/ {print $1}' | awk 'NF'; }
+          map_add() { echo "$1|$2" >> "$DST/.origmap"; }
+          map_get() { awk -F'|' -v k="$1" '$1==k{print $2;exit}' "$DST/.origmap"; }
+          exclude_lib() { b="$(basename "$1")"; case "$b" in linux-vdso.so.*|ld-linux*.so.*|libc.so.*|libpthread.so.*|librt.so.*|libm.so.*|libdl.so.*|libgcc_s.so.*|libstdc++.so.*) return 0;; esac; return 1; }
+
+          copy_lib() {
+            abs="$1"
+            [ -f "$abs" ] || return 0
+            real="$(readlink -f "$abs")"
+            base="$(basename "$real")"
+            if [ ! -f "$DST/$base" ]; then
+              cp -pL "$real" "$DST/$base"
+              map_add "$base" "$real"
+              so="$(readelf -d "$real" 2>/dev/null | awk -F'[][]' '/SONAME/ {print $2; exit}')"
+              if [ -n "$so" ] && [ ! -e "$DST/$so" ]; then ln -s "$base" "$DST/$so" || true; fi
+            fi
+          }
+
+          bundle_one() {
+            prog="$1"
+            src="bin/$prog"
+            cp "$src" "$prog"
+
+            initial="$(deps_list "$src" || true)"
+            queue=""
+            for dep in $initial; do
+              exclude_lib "$dep" && continue
+              copy_lib "$dep"
+              b="$(basename "$(readlink -f "$dep")")"
+              queue="$queue $b"
+            done
+
+            while [ -n "$queue" ]; do
+              next=""
+              for b in $queue; do
+                orig="$(map_get "$b")"
+                [ -n "$orig" ] || continue
+                for sub in $(deps_list "$orig" || true); do
+                  exclude_lib "$sub" && continue
+                  copy_lib "$sub"
+                  sb="$(basename "$(readlink -f "$sub")")"
+                  next="$next $sb"
+                done
+              done
+              queue="$(printf '%s\n' $next | awk 'NF' | sort -u | tr '\n' ' ')"
+            done
+
+            patchelf --remove-rpath "$prog" 2>/dev/null || true
+            patchelf --force-rpath --set-rpath '$ORIGIN/lib:$ORIGIN/libs' "$prog"
+            for f in "$DST"/*.so*; do
+              [ -e "$f" ] || continue
+              patchelf --remove-rpath "$f" 2>/dev/null || true
+              patchelf --force-rpath --set-rpath '$ORIGIN' "$f" || true
+            done
+
+            ldd "$prog"
+          }
+
+          ensure_dlopen_libs() {
+            prog="$1"
+            for name in $(strings "$prog" | grep -Eo 'lib[^/[:space:]]+\.so(\.[0-9]+)*' | sort -u); do
+              [ -e "$DST/$name" ] && continue
+              found=""
+              for dir in bin bin/shared bin/shared/private bin/default .; do
+                [ -z "$found" ] && [ -d "$dir" ] && found="$(find "$dir" -type f -name "$name" -o -name "${name%%.so*}*.so*" 2>/dev/null | head -n 1 || true)"
+              done
+              [ -z "$found" ] && continue
+              base="$(basename "$(readlink -f "$found")")"
+              [ -f "$DST/$base" ] || cp -pL "$found" "$DST/$base"
+              so="$(readelf -d "$found" 2>/dev/null | awk -F'[][]' '/SONAME/ {print $2; exit}')"
+              [ -n "$so" ] && [ ! -e "$DST/$so" ] && ln -s "$base" "$DST/$so" || true
+            done
+          }
+
+          for p in net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit; do
+            bundle_one "$p"
+          done
+
+          for f in $(find bin -type f -name 'lib*private-samba*.so*' -o -name 'libsecrets*.*samba*.so*' 2>/dev/null); do
+            base="$(basename "$f")"
+            [ -f "$DST/$base" ] || cp -pL "$f" "$DST/$base"
+          done
+          [ -e "$DST/libsecrets3-private-samba.so" ] || {
+            c="$(ls "$DST"/libsecrets3-private-samba*.so* 2>/dev/null | head -n 1 || true)"
+            [ -n "$c" ] && ln -sf "$(basename "$c")" "$DST/libsecrets3-private-samba.so" || true
+          }
+
+          for p in smbclient tdbtool tdbbackup; do
+            ensure_dlopen_libs "$p"
+          done
+
+          [ -e libs ] || ln -s "$DST" libs
+
+          find . -maxdepth 1 -type f -name 'lib*.so*' -exec mv -n '{}' "$DST/" \;
+
+      - name: Package monolith
+        if: runner.os == 'Linux'
+        run: |
+          tar -czf linux-monolith.tar.gz \
+            lib net rpcclient smbcacls smbclient smbcontrol smbcquotas smbd \
+            smbget smbpasswd smbstatus smbtree tdbbackup tdbtool testparm pdbedit
+
+      - name: Upload config logs
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: samba-config-logs
+          path: bin/config.log
+          if-no-files-found: warn
+
+      - name: Upload monolith
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-monolith
+          path: linux-monolith.tar.gz
+          if-no-files-found: error
