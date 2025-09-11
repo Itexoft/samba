@@ -52,9 +52,9 @@ jobs:
 
           PY="$(pwd)/.venv/bin/python"
           PYVER="$($PY - <<'PY'
-import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")
-PY
-)"
+          import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")
+          PY
+          )"
           ARCH="$(gcc -dumpmachine)"
           PCDIR="/usr/lib/${ARCH}/pkgconfig"
 
