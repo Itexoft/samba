@@ -75,8 +75,8 @@ jobs:
           [ -f "$PCDIR/python-$PYVER.pc" ] && [ ! -e ".ci/pkgconfig/python3.pc" ] && ln -s "$PCDIR/python-$PYVER.pc" ".ci/pkgconfig/python3.pc" || true
 
           export PKG_CONFIG_PATH=".ci/pkgconfig:$PCDIR:${PKG_CONFIG_PATH:-}"
-          export CPPFLAGS="-I$PYINCLUDE -include $(pwd)/.ci/compat_linux.h ${CPPFLAGS:-}"
-          export CFLAGS="-include $(pwd)/.ci/compat_linux.h ${CFLAGS:-}"
+          # export CPPFLAGS="-I$PYINCLUDE -include $(pwd)/.ci/compat_linux.h ${CPPFLAGS:-}"
+          # export CFLAGS="-include $(pwd)/.ci/compat_linux.h ${CFLAGS:-}"
           export LDFLAGS="-L$PYLIBDIR ${LDFLAGS:-} -lcrypt"
 
           set +e
