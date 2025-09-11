@@ -53,13 +53,13 @@ jobs:
           PY="$(pwd)/.venv/bin/python"
       
           PYVER="$($PY - <<'PY'
-      import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")
-      PY
-      )"
+          import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")
+          PY
+          )"
           PCDIR="$($PY - <<'PY'
-      import sysconfig, os; print(os.path.join(sysconfig.get_config_var('LIBDIR'), 'pkgconfig'))
-      PY
-      )"
+          import sysconfig, os; print(os.path.join(sysconfig.get_config_var('LIBDIR'), 'pkgconfig'))
+          PY
+          )"
       
           mkdir -p .ci/pkgconfig
           [ -f "$PCDIR/python-$PYVER-embed.pc" ] && [ ! -e ".ci/pkgconfig/python3-embed.pc" ] && ln -s "$PCDIR/python-$PYVER-embed.pc" ".ci/pkgconfig/python3-embed.pc" || true
