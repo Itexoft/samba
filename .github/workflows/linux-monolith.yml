@@ -21,9 +21,9 @@ jobs:
             libpopt-dev libgnutls28-dev libreadline-dev libarchive-dev libicu-dev libutf8proc-dev \
             libjansson-dev liblmdb-dev libldap2-dev libtirpc-dev libkrb5-dev \
             libassuan-dev libgpg-error-dev libgpgme-dev gettext dbus libdbus-1-dev libglib2.0-dev \
-            libcups2-dev libcmocka-dev openssl libssl-dev swig perl cpanminus gdb \
+            libcups2-dev libcmocka-dev openssl libssl-dev swig perl gdb \
             python3 python3-venv python3-dev python3-pip python3.12-dev patchelf binutils gnupg \
-            libparse-yapp-perl
+            libparse-yapp-perl xsltproc
       
           mkdir -p .ci
       
@@ -56,19 +56,31 @@ jobs:
           PY
           )"
           ARCH="$(gcc -dumpmachine)"
-          PCDIR="/usr/lib/${ARCH}/pkgconfig"
+          PCDIR1="$($PY - <<'PY'
+          import sysconfig, os; print(os.path.join(sysconfig.get_config_var('LIBDIR') or '/usr/lib', 'pkgconfig'))
+          PY
+          )"
+          PCDIR2="/usr/lib/${ARCH}/pkgconfig"
+          PCDIR3="/usr/lib/pkgconfig"
+          PCDIR4="/usr/share/pkgconfig"
       
           mkdir -p .ci/pkgconfig
-          [ -f "$PCDIR/python-$PYVER-embed.pc" ] && [ ! -e ".ci/pkgconfig/python3-embed.pc" ] && ln -s "$PCDIR/python-$PYVER-embed.pc" ".ci/pkgconfig/python3-embed.pc" || true
-          [ -f "$PCDIR/python-$PYVER.pc" ] && [ ! -e ".ci/pkgconfig/python3.pc" ] && ln -s "$PCDIR/python-$PYVER.pc" ".ci/pkgconfig/python3.pc" || true
-          export PKG_CONFIG_PATH=".ci/pkgconfig:$PCDIR:${PKG_CONFIG_PATH:-}"
+          for d in "$PCDIR1" "$PCDIR2" "$PCDIR3" "$PCDIR4"; do
+            [ -z "$EMBED" ] && [ -f "$d/python-$PYVER-embed.pc" ] && EMBED="$d/python-$PYVER-embed.pc"
+            [ -z "$BASE" ] && [ -f "$d/python-$PYVER.pc" ] && BASE="$d/python-$PYVER.pc"
+          done
+          [ -n "$EMBED" ] && [ ! -e ".ci/pkgconfig/python3-embed.pc" ] && ln -s "$EMBED" ".ci/pkgconfig/python3-embed.pc" || true
+          [ -n "$BASE" ] && [ ! -e ".ci/pkgconfig/python3.pc" ] && ln -s "$BASE" ".ci/pkgconfig/python3.pc" || true
+      
+          export PKG_CONFIG_PATH=".ci/pkgconfig:$PCDIR1:$PCDIR2:$PCDIR3:$PCDIR4:${PKG_CONFIG_PATH:-}"
       
           set +e
           PYTHON="$PY" ./configure --without-acl-support --without-gettext --bundled-libraries=ALL \
             --nonshared-binary=net,rpcclient,smbcacls,smbcontrol,smbcquotas,smbd/smbd,smbget,smbpasswd,smbstatus,smbtree,tdbbackup,tdbtool,testparm,pdbedit \
             --with-static-modules=vfs_fruit,vfs_streams_xattr,vfs_catia,vfs_acl_xattr,vfs_acl_tdb,vfs_xattr_tdb,vfs_recycle,vfs_shadow_copy2,vfs_full_audit,vfs_extd_audit,vfs_readahead,vfs_preopen,vfs_aio_pthread,vfs_fake_perms,vfs_readonly,vfs_offline,vfs_time_audit,vfs_commit,vfs_crossrename,vfs_dirsort,vfs_expand_msdfs,vfs_default_quota,vfs_streams_depot,vfs_syncops,vfs_widelinks,vfs_worm,vfs_audit,auth_unix,auth_winbind,auth_builtin,pdb_tdbsam,pdb_smbpasswd,pdb_ldapsam \
             --with-shared-modules=idmap_tdb,idmap_tdb2,idmap_rid,idmap_autorid,idmap_ad,idmap_ldap,idmap_script,idmap_nss,idmap_rfc2307,pdb_wbc_sam \
-            --without-gpgme
+            --without-gpgme \
+            --without-pam
           st=$?
           set -e
           if [ "$st" -ne 0 ]; then
