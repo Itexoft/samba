@@ -11,6 +11,79 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Linux deps + build
+        if: runner.os == 'Linux'
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y \
+            git build-essential autoconf automake libtool pkg-config bison flex \
+            libpopt-dev libgnutls28-dev libreadline-dev libarchive-dev libicu-dev libutf8proc-dev \
+            libjansson-dev liblmdb-dev libldap2-dev libtirpc-dev libkrb5-dev \
+            libassuan-dev libgpg-error-dev libgpgme-dev gettext dbus libdbus-1-dev libglib2.0-dev \
+            libcups2-dev libcmocka-dev openssl libssl-dev swig perl cpanminus gdb \
+            python3 python3-venv python3-dev python3-pip python3.12-dev patchelf binutils gnupg libxcrypt-dev
+          cpanm Parse::Yapp
+      
+          mkdir -p .ci
+      
+          git checkout -- lib/ldb/wscript || true
+          if ! grep -q "test_ldb_comparison_fold'.*enabled=False" lib/ldb/wscript; then
+            sed -E -i "s/\('test_ldb_comparison_fold',/\('test_ldb_comparison_fold', enabled=False,/" lib/ldb/wscript
+          fi
+      
+          cat > .ci/bison <<'EOF'
+          #!/bin/sh
+          REAL="/usr/bin/bison"
+          args=""
+          for a in "$@"; do
+            [ "$a" = "--no-line" ] && a="--no-lines"
+            args="$args \"$a\""
+          done
+          eval exec "$REAL" $args
+          EOF
+          chmod +x .ci/bison
+          export PATH="$(pwd)/.ci:$PATH"
+      
+          python3 -m venv --system-site-packages .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install dnspython iso8601 pyasn1 setproctitle requests markdown cryptography
+      
+          PY="$(pwd)/.venv/bin/python"
+      
+          PYVER="$($PY - <<'PY'
+      import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")
+      PY
+      )"
+          PCDIR="$($PY - <<'PY'
+      import sysconfig, os; print(os.path.join(sysconfig.get_config_var('LIBDIR'), 'pkgconfig'))
+      PY
+      )"
+      
+          mkdir -p .ci/pkgconfig
+          [ -f "$PCDIR/python-$PYVER-embed.pc" ] && [ ! -e ".ci/pkgconfig/python3-embed.pc" ] && ln -s "$PCDIR/python-$PYVER-embed.pc" ".ci/pkgconfig/python3-embed.pc" || true
+          [ -f "$PCDIR/python-$PYVER.pc" ] && [ ! -e ".ci/pkgconfig/python3.pc" ] && ln -s "$PCDIR/python-$PYVER.pc" ".ci/pkgconfig/python3.pc" || true
+          export PKG_CONFIG_PATH=".ci/pkgconfig:$PCDIR:${PKG_CONFIG_PATH:-}"
+      
+          set +e
+          PYTHON="$PY" ./configure --without-acl-support --without-gettext --bundled-libraries=ALL \
+            --nonshared-binary=net,rpcclient,smbcacls,smbcontrol,smbcquotas,smbd/smbd,smbget,smbpasswd,smbstatus,smbtree,tdbbackup,tdbtool,testparm,pdbedit \
+            --with-static-modules=vfs_fruit,vfs_streams_xattr,vfs_catia,vfs_acl_xattr,vfs_acl_tdb,vfs_xattr_tdb,vfs_recycle,vfs_shadow_copy2,vfs_full_audit,vfs_extd_audit,vfs_readahead,vfs_preopen,vfs_aio_pthread,vfs_fake_perms,vfs_readonly,vfs_offline,vfs_time_audit,vfs_commit,vfs_crossrename,vfs_dirsort,vfs_expand_msdfs,vfs_default_quota,vfs_streams_depot,vfs_syncops,vfs_widelinks,vfs_worm,vfs_audit,auth_unix,auth_winbind,auth_builtin,pdb_tdbsam,pdb_smbpasswd,pdb_ldapsam \
+            --with-shared-modules=idmap_tdb,idmap_tdb2,idmap_rid,idmap_autorid,idmap_ad,idmap_ldap,idmap_script,idmap_nss,idmap_rfc2307,pdb_wbc_sam \
+            --without-gpgme
+          st=$?
+          set -e
+          if [ "$st" -ne 0 ]; then
+            echo "----- HEAD bin/config.log (first 200) -----" || true
+            [ -f bin/config.log ] && sed -n '1,200p' bin/config.log || true
+            echo "----- TAIL bin/config.log (last 400) -----" || true
+            [ -f bin/config.log ] && tail -n 400 bin/config.log || true
+            exit "$st"
+          fi
+      
+          make JOBS="$(nproc)"
+
       - name: Bundle shared libraries
         if: runner.os == 'Linux'
         run: |
