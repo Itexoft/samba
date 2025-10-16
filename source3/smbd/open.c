@@ -2045,7 +2045,10 @@ static NTSTATUS grant_new_fsp_lease(struct files_struct *fsp,
 	fsp->lease->lease.parent_lease_key = lease->parent_lease_key;
 	fsp->lease->lease.lease_flags = lease->lease_flags;
 	fsp->lease->lease.lease_state = granted;
-	fsp->lease->lease.lease_epoch = lease->lease_epoch + 1;
+	fsp->lease->lease.lease_epoch = lease->lease_epoch;
+	if (granted != 0) {
+		fsp->lease->lease.lease_epoch++;
+	}
 
 	status = leases_db_add(client_guid,
 			       &lease->lease_key,
@@ -2130,6 +2133,7 @@ struct delay_for_oplock_state {
 	bool will_overwrite;
 	uint32_t delay_mask;
 	bool first_open_attempt;
+	int info;
 	bool got_handle_lease;
 	bool got_oplock;
 	bool disallow_write_lease;
@@ -2373,6 +2377,7 @@ static NTSTATUS delay_for_oplock(files_struct *fsp,
 				 bool have_sharing_violation,
 				 uint32_t create_disposition,
 				 bool first_open_attempt,
+				 int info,
 				 int *poplock_type,
 				 uint32_t *pgranted,
 				 struct blocker_debug_state **blocker_debug_state)
@@ -2381,6 +2386,7 @@ static NTSTATUS delay_for_oplock(files_struct *fsp,
 		.fsp = fsp,
 		.lease = lease,
 		.first_open_attempt = first_open_attempt,
+		.info = info,
 	};
 	uint32_t requested;
 	uint32_t granted;
@@ -2486,7 +2492,7 @@ grant:
 		}
 	}
 
-	if (lp_locking(fsp->conn->params) && file_has_brlocks(fsp)) {
+	if (info != FILE_WAS_OVERWRITTEN && file_has_brlocks(fsp)) {
 		DBG_DEBUG("file %s has byte range locks\n",
 			  fsp_str_dbg(fsp));
 		granted &= ~(SMB2_LEASE_READ | SMB2_LEASE_HANDLE);
@@ -2571,6 +2577,7 @@ static NTSTATUS handle_share_mode_lease(
 	int oplock_request,
 	const struct smb2_lease *lease,
 	bool first_open_attempt,
+	int info,
 	int *poplock_type,
 	uint32_t *pgranted,
 	struct blocker_debug_state **blocker_debug_state)
@@ -2623,6 +2630,7 @@ static NTSTATUS handle_share_mode_lease(
 		sharing_violation,
 		create_disposition,
 		first_open_attempt,
+		info,
 		poplock_type,
 		pgranted,
 		blocker_debug_state);
@@ -3071,7 +3079,8 @@ static NTSTATUS check_and_store_share_mode(
 	uint32_t share_access,
 	int oplock_request,
 	const struct smb2_lease *lease,
-	bool first_open_attempt)
+	bool first_open_attempt,
+	int info)
 {
 	NTSTATUS status;
 	int oplock_type = NO_OPLOCK;
@@ -3099,6 +3108,7 @@ static NTSTATUS check_and_store_share_mode(
 					 oplock_request,
 					 lease,
 					 first_open_attempt,
+					 info,
 					 &oplock_type,
 					 &granted_lease,
 					 &blocker_debug_state);
@@ -3429,6 +3439,7 @@ struct open_ntcreate_lock_state {
 	int oplock_request;
 	const struct smb2_lease *lease;
 	bool first_open_attempt;
+	int info;
 	bool keep_locked;
 	NTSTATUS status;
 	share_mode_entry_prepare_unlock_fn_t cleanup_fn;
@@ -3456,7 +3467,8 @@ static void open_ntcreate_lock_add_entry(struct share_mode_lock *lck,
 						   state->share_access,
 						   state->oplock_request,
 						   state->lease,
-						   state->first_open_attempt);
+						   state->first_open_attempt,
+						   state->info);
 	if (!NT_STATUS_IS_OK(state->status)) {
 		return;
 	}
@@ -3816,7 +3828,7 @@ static NTSTATUS open_file_ntcreate(connection_struct *conn,
 		 * which adds FILE_WRITE_DATA to open_access_mask.
 		 */
 		if (is_oplock_stat_open(open_access_mask) && lease == NULL) {
-			oplock_request = NO_OPLOCK;
+			oplock_request &= SAMBA_PRIVATE_OPLOCK_MASK;
 		}
 	}
 
@@ -4063,15 +4075,6 @@ static NTSTATUS open_file_ntcreate(connection_struct *conn,
 	} else {
 		if (flags & O_TRUNC) {
 			info = FILE_WAS_OVERWRITTEN;
-			/*
-			 * We did not truncate the file yet, we're doing that
-			 * explicitly with SMB_VFS_FTRUNCATE() below under the
-			 * sharemode glock. For correct handling of RH leases in
-			 * the presence of byterange locks, the leases code
-			 * needs the "correct" filesize which should be 0 at
-			 * this place if we did the O_TRUNC at open() time.
-			 */
-			fsp->fsp_name->st.st_ex_size = 0;
 		} else {
 			info = FILE_WAS_OPENED;
 		}
@@ -4100,6 +4103,7 @@ static NTSTATUS open_file_ntcreate(connection_struct *conn,
 		.oplock_request		= oplock_request,
 		.lease			= lease,
 		.first_open_attempt	= first_open_attempt,
+		.info			= info,
 		.keep_locked		= keep_locked,
 	};
 
@@ -5163,7 +5167,7 @@ static NTSTATUS open_directory(connection_struct *conn,
 		/*
 		 * No oplocks on directories, only leases
 		 */
-		oplock_request = NO_OPLOCK;
+		oplock_request &= SAMBA_PRIVATE_OPLOCK_MASK;
 	}
 
 	lck_state = (struct open_ntcreate_lock_state) {
@@ -6169,7 +6173,7 @@ static NTSTATUS create_file_unixpath(connection_struct *conn,
 	}
 
 	if (req == NULL) {
-		oplock_request |= INTERNAL_OPEN_ONLY;
+		oplock_request = INTERNAL_OPEN_ONLY;
 	}
 
 	if (lease != NULL) {

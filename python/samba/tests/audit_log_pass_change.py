@@ -43,6 +43,9 @@ USER_PASS = samba.generate_random_password(32, 32)
 SECOND_USER_NAME = "auditlogtestuser02"
 SECOND_USER_PASS = samba.generate_random_password(32, 32)
 
+MACHINE_NAME = "auditlogtestmachineuser"
+MACHINE_PASS = samba.generate_random_password(32, 32)
+
 
 class AuditLogPassChangeTests(AuditLogTestBase):
 
@@ -93,6 +96,17 @@ class AuditLogPassChangeTests(AuditLogTestBase):
             "objectclass": "user",
             "sAMAccountName": USER_NAME,
             "userPassword": USER_PASS
+        })
+
+        # (Re)adds the test user MACHINE_NAME with password MACHINE_PASS
+        delete_force(
+            self.ldb,
+            "cn=" + MACHINE_NAME + ",cn=users," + self.base_dn)
+        self.ldb.add({
+            "dn": "cn=" + MACHINE_NAME + ",cn=users," + self.base_dn,
+            "objectclass": "computer",
+            "sAMAccountName": MACHINE_NAME,
+            "userPassword": MACHINE_PASS
         })
 
     #
@@ -403,163 +417,11 @@ class AuditLogPassChangeTests(AuditLogTestBase):
         session_id = self.get_session()
         service_description = self.get_service_description()
         self.assertEqual(service_description, "LDAP")
+
+        self._test_ldap_authentication_information(
+            "msDS-keyCredentialLink", kcls)
+
         transactions_seen = set()
-
-        with self.subTest("initial setup"):
-            self.ldb.modify_ldif(
-                f"dn: {dn}\n"
-                "changetype: modify\n"
-                "add: msDS-keyCredentialLink\n"
-                f"msDS-keyCredentialLink: {kcls[0]}\n")
-            messages = self.waitForMessages(1, dn=dn)
-            print("Received %d messages" % len(messages))
-            self.assertEqual(1, len(messages))
-            audit = messages[0]["passwordChange"]
-            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
-            self.assertEqual("Public key change", audit["action"])
-            self.assertEqual(dn, audit["dn"])
-            self.assertIn(self.remoteAddress, audit["remoteAddress"])
-            self.assertEqual(session_id, audit["sessionId"])
-            transactions_seen.add(audit["transactionId"])
-            self.assertEqual(0, audit["statusCode"])
-            self.discardMessages()
-
-        with self.subTest("replace"):
-            self.ldb.modify_ldif(
-                f"dn: {dn}\n"
-                "changetype: modify\n"
-                "replace: msDS-keyCredentialLink\n"
-                f"msDS-keyCredentialLink: {kcls[1]}\n")
-            messages = self.waitForMessages(1, dn=dn)
-            print("Received %d messages" % len(messages))
-            self.assertEqual(1, len(messages))
-            audit = messages[0]["passwordChange"]
-            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
-            self.assertEqual("Public key change", audit["action"])
-            self.assertEqual(dn, audit["dn"])
-            self.assertIn(self.remoteAddress, audit["remoteAddress"])
-            self.assertTrue(self.is_guid(audit["sessionId"]))
-            transactions_seen.add(audit["transactionId"])
-            self.discardMessages()
-
-        with self.subTest("constrained replace"):
-            self.ldb.modify_ldif(
-                f"dn: {dn}\n"
-                "changetype: modify\n"
-                "delete: msDS-keyCredentialLink\n"
-                f"msDS-keyCredentialLink: {kcls[1]}\n"
-                "add: msDS-keyCredentialLink\n"
-                f"msDS-keyCredentialLink: {kcls[2]}\n")
-            messages = self.waitForMessages(1, dn=dn)
-            print("Received %d messages" % len(messages))
-            self.assertEqual(1, len(messages))
-            audit = messages[0]["passwordChange"]
-            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
-            self.assertEqual("Public key change", audit["action"])
-            self.assertEqual(dn, audit["dn"])
-            self.assertIn(self.remoteAddress, audit["remoteAddress"])
-            self.assertEqual(session_id, audit["sessionId"])
-            self.assertEqual(0, audit["statusCode"])
-            transactions_seen.add(audit["transactionId"])
-            self.discardMessages()
-
-        with self.subTest("identical replace"):
-            # replacing the KCL with itself still sends the message.
-            self.ldb.modify_ldif(
-                f"dn: {dn}\n"
-                "changetype: modify\n"
-                "replace: msDS-keyCredentialLink\n"
-                f"msDS-keyCredentialLink: {kcls[2]}\n")
-            messages = self.waitForMessages(1, dn=dn)
-            print("Received %d messages" % len(messages))
-            self.assertEqual(1, len(messages))
-            audit = messages[0]["passwordChange"]
-            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
-            self.assertEqual("Public key change", audit["action"])
-            self.assertEqual(dn, audit["dn"])
-            self.assertIn(self.remoteAddress, audit["remoteAddress"])
-            self.assertEqual(session_id, audit["sessionId"])
-            self.assertEqual(0, audit["statusCode"])
-            transactions_seen.add(audit["transactionId"])
-            self.discardMessages()
-
-        with self.subTest("replace KCL AND password"):
-            # there should be two messages
-            self.ldb.modify_ldif(
-                f"dn: {dn}\n"
-                "changetype: modify\n"
-                "replace: msDS-keyCredentialLink\n"
-                f"msDS-keyCredentialLink: {kcls[0]}\n"
-                "replace: userPassword\n"
-                "userPassword: gruffalo3.\n")
-            messages = self.waitForMessages(2, dn=dn)
-            self.assertEqual(2, len(messages))
-            pwd_audit = messages[0]["passwordChange"]
-            kcl_audit = messages[1]["passwordChange"]
-            # we send the password message first, but we don't need to
-            # depend on that.
-            if pwd_audit["eventId"] == EVT_ID_DIRECTORY_OBJECT_CHANGE:
-                kcl_audit, pwd_audit = pwd_audit, kcl_audit
-            del audit
-            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, kcl_audit["eventId"])
-            self.assertEqual(EVT_ID_PASSWORD_RESET, pwd_audit["eventId"])
-            self.assertEqual("Public key change", kcl_audit["action"])
-            self.assertEqual("Reset", pwd_audit["action"])
-            # if we delete the action and eventId, the rest of
-            # structures should be the same (sessionId, transactionId,
-            # version, etc). Timestamps are in the outer message.
-            del pwd_audit["eventId"]
-            del pwd_audit["action"]
-            del kcl_audit["eventId"]
-            del kcl_audit["action"]
-            self.assertEqual(kcl_audit, pwd_audit)
-            transactions_seen.add(pwd_audit["transactionId"])
-            self.discardMessages()
-
-        with self.subTest("delete"):
-            # replacing the KCL with itself still sends the message.
-            self.ldb.modify_ldif(
-                f"dn: {dn}\n"
-                "changetype: modify\n"
-                "delete: msDS-keyCredentialLink\n"
-                f"msDS-keyCredentialLink: {kcls[0]}\n")
-            messages = self.waitForMessages(1, dn=dn)
-            print("Received %d messages" % len(messages))
-            self.assertEqual(1, len(messages))
-            audit = messages[0]["passwordChange"]
-            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
-            self.assertEqual("Public key change", audit["action"])
-            self.assertEqual(dn, audit["dn"])
-            self.assertIn(self.remoteAddress, audit["remoteAddress"])
-            self.assertEqual(session_id, audit["sessionId"])
-            self.assertEqual(0, audit["statusCode"])
-            transactions_seen.add(audit["transactionId"])
-            self.discardMessages()
-
-        with self.subTest("delete that which does not exist"):
-            # still sends a message
-            with self.assertRaises(LdbError) as e:
-                self.ldb.modify_ldif(
-                    f"dn: {dn}\n"
-                    "changetype: modify\n"
-                    "delete: msDS-keyCredentialLink\n"
-                    f"msDS-keyCredentialLink: {kcls[2]}\n")
-            self.assertEqual(e.exception.args[0], ERR_NO_SUCH_ATTRIBUTE)
-            messages = self.waitForMessages(1, dn=dn)
-            print("Received %d messages" % len(messages))
-            # We still get the message on a failed attempt
-            self.assertEqual(1, len(messages))
-            audit = messages[0]["passwordChange"]
-            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
-            self.assertEqual("Public key change", audit["action"])
-            self.assertEqual(dn, audit["dn"])
-            self.assertIn(self.remoteAddress, audit["remoteAddress"])
-            self.assertEqual(session_id, audit["sessionId"])
-            transactions_seen.add(audit["transactionId"])
-            self.discardMessages()
-            with self.subTest("check status code"):
-                self.assertEqual(ERR_NO_SUCH_ATTRIBUTE, audit["statusCode"])
-                self.assertEqual("No such attribute", audit["status"])
 
         with self.subTest("add bad KCL DN value"):
             self.ldb.modify_ldif(
@@ -571,18 +433,12 @@ class AuditLogPassChangeTests(AuditLogTestBase):
             self.discardMessages()
             audit = messages[0]["passwordChange"]
             self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
-            self.assertEqual("Public key change", audit["action"])
+            self.assertEqual("Auth info change", audit["action"])
             self.assertEqual(dn, audit["dn"])
             self.assertIn(self.remoteAddress, audit["remoteAddress"])
             self.assertEqual(session_id, audit["sessionId"])
             self.assertEqual(0, audit["statusCode"])
             transactions_seen.add(audit["transactionId"])
-
-        # these should all have been separate transactions
-        with self.subTest("check transactions"):
-            self.assertEqual(len(transactions_seen), 8)
-            for t in transactions_seen:
-                self.assertTrue(self.is_guid(t))
 
         with self.subTest("add a second DN value"):
             # should this fail?
@@ -595,11 +451,18 @@ class AuditLogPassChangeTests(AuditLogTestBase):
             self.discardMessages()
             audit = messages[0]["passwordChange"]
             self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
-            self.assertEqual("Public key change", audit["action"])
+            self.assertEqual("Auth info change", audit["action"])
             self.assertEqual(dn, audit["dn"])
             self.assertIn(self.remoteAddress, audit["remoteAddress"])
             self.assertEqual(session_id, audit["sessionId"])
             self.assertEqual(0, audit["statusCode"])
+            transactions_seen.add(audit["transactionId"])
+
+        # these should all have been separate transactions
+        with self.subTest("check transactions"):
+            self.assertEqual(len(transactions_seen), 2)
+            for t in transactions_seen:
+                self.assertTrue(self.is_guid(t))
 
         with self.subTest("add bad Binary DN value"):
             for bad_dn in ('B:6:f1ea:{dn}', 'flea', dn):
@@ -614,3 +477,234 @@ class AuditLogPassChangeTests(AuditLogTestBase):
             # because DN syntax check comes first
             messages = self.waitForMessages(1, dn=dn)
             self.assertEqual(0, len(messages))
+
+
+    def test_ldap_altSecurityIdentities(self):
+        """Test logging of altSecurityIdentities changes.
+        """
+        values = [
+            "X509:<SKI>123456789123",
+            "X509:<S>SubjectName<I>IssuerName",
+            "X509:<I>IssuerName<SR>123456789123"
+        ]
+        self._test_ldap_authentication_information(
+            "altSecurityIdentities", values)
+
+
+    def test_ldap_service_principal_name(self):
+        """Test logging of servicePrincipalName changes.
+        """
+        values = [
+            "HOST/principal1",
+            "HOST/principal2",
+            "HOST/Principla3"
+        ]
+        self._test_ldap_authentication_information(
+            "servicePrincipalName", values)
+
+
+    def test_ldap_dns_host_name(self):
+        """Test logging of dNSHostName changes.
+        """
+        values = [
+            "host1.test.samba.org",
+            "host2.test.samba.org",
+            "host3.test.samba.org"
+        ]
+        self._test_ldap_authentication_information(
+            "dNSHostName", values, user=MACHINE_NAME)
+
+    def test_ldap_msDS_AdditionalDnsHostName(self):
+        """Test logging of msDS-AdditionalDnsHostName changes.
+        """
+        values = [
+            "host1.test.samba.org",
+            "host2.test.samba.org",
+            "host3.test.samba.org"
+        ]
+        self._test_ldap_authentication_information(
+            "msDS-AdditionalDnsHostName", values, user=MACHINE_NAME)
+
+    def _test_ldap_authentication_information(
+            self,
+            attribute,
+            values,
+            user=USER_NAME ):
+        """Test logging of authentication information changes.
+        """
+        #
+        # To avoid all the set-up cost of making a fresh DB and user,
+        # we use sub-tests in this test.
+        #
+
+        dn = f"cn={user},cn=users,{self.base_dn}"
+        self.discardSetupMessages(dn)
+
+        session_id = self.get_session()
+        service_description = self.get_service_description()
+        self.assertEqual(service_description, "LDAP")
+        transactions_seen = set()
+
+        with self.subTest("initial setup"):
+            self.ldb.modify_ldif(
+                f"dn: {dn}\n"
+                "changetype: modify\n"
+                f"add: {attribute}\n"
+                f"{attribute}: {values[0]}\n")
+            messages = self.waitForMessages(1, dn=dn)
+            print("Received %d messages" % len(messages))
+            self.assertEqual(1, len(messages))
+            audit = messages[0]["passwordChange"]
+            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
+            self.assertEqual("Auth info change", audit["action"])
+            self.assertEqual(dn, audit["dn"])
+            self.assertIn(self.remoteAddress, audit["remoteAddress"])
+            self.assertEqual(session_id, audit["sessionId"])
+            transactions_seen.add(audit["transactionId"])
+            self.assertEqual(0, audit["statusCode"])
+            self.discardMessages()
+
+        with self.subTest("replace"):
+            self.ldb.modify_ldif(
+                f"dn: {dn}\n"
+                "changetype: modify\n"
+                f"replace: {attribute}\n"
+                f"{attribute}: {values[1]}\n")
+            messages = self.waitForMessages(1, dn=dn)
+            print("Received %d messages" % len(messages))
+            self.assertEqual(1, len(messages))
+            audit = messages[0]["passwordChange"]
+            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
+            self.assertEqual("Auth info change", audit["action"])
+            self.assertEqual(dn, audit["dn"])
+            self.assertIn(self.remoteAddress, audit["remoteAddress"])
+            self.assertTrue(self.is_guid(audit["sessionId"]))
+            transactions_seen.add(audit["transactionId"])
+            self.discardMessages()
+
+        with self.subTest("constrained replace"):
+            self.ldb.modify_ldif(
+                f"dn: {dn}\n"
+                "changetype: modify\n"
+                f"delete: {attribute}\n"
+                f"{attribute}: {values[1]}\n"
+                f"add: {attribute}\n"
+                f"{attribute}: {values[2]}\n")
+            messages = self.waitForMessages(1, dn=dn)
+            print("Received %d messages" % len(messages))
+            self.assertEqual(1, len(messages))
+            audit = messages[0]["passwordChange"]
+            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
+            self.assertEqual("Auth info change", audit["action"])
+            self.assertEqual(dn, audit["dn"])
+            self.assertIn(self.remoteAddress, audit["remoteAddress"])
+            self.assertEqual(session_id, audit["sessionId"])
+            self.assertEqual(0, audit["statusCode"])
+            transactions_seen.add(audit["transactionId"])
+            self.discardMessages()
+
+        with self.subTest("identical replace"):
+            # replacing the value with itself still sends the message.
+            self.ldb.modify_ldif(
+                f"dn: {dn}\n"
+                "changetype: modify\n"
+                f"replace: {attribute}\n"
+                f"{attribute}: {values[2]}\n")
+            messages = self.waitForMessages(1, dn=dn)
+            print("Received %d messages" % len(messages))
+            self.assertEqual(1, len(messages))
+            audit = messages[0]["passwordChange"]
+            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
+            self.assertEqual("Auth info change", audit["action"])
+            self.assertEqual(dn, audit["dn"])
+            self.assertIn(self.remoteAddress, audit["remoteAddress"])
+            self.assertEqual(session_id, audit["sessionId"])
+            self.assertEqual(0, audit["statusCode"])
+            transactions_seen.add(audit["transactionId"])
+            self.discardMessages()
+
+        with self.subTest("replace authentication information AND password"):
+            # there should be two messages
+            self.ldb.modify_ldif(
+                f"dn: {dn}\n"
+                "changetype: modify\n"
+                f"replace:{attribute}\n"
+                f"{attribute}: {values[0]}\n"
+                "replace: userPassword\n"
+                "userPassword: gruffalo3.\n")
+            messages = self.waitForMessages(2, dn=dn)
+            self.assertEqual(2, len(messages))
+            pwd_audit = messages[0]["passwordChange"]
+            kcl_audit = messages[1]["passwordChange"]
+            # we send the password message first, but we don't need to
+            # depend on that.
+            if pwd_audit["eventId"] == EVT_ID_DIRECTORY_OBJECT_CHANGE:
+                kcl_audit, pwd_audit = pwd_audit, kcl_audit
+            del audit
+            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, kcl_audit["eventId"])
+            self.assertEqual(EVT_ID_PASSWORD_RESET, pwd_audit["eventId"])
+            self.assertEqual("Auth info change", kcl_audit["action"])
+            self.assertEqual("Reset", pwd_audit["action"])
+            # if we delete the action and eventId, the rest of
+            # structures should be the same (sessionId, transactionId,
+            # version, etc). Timestamps are in the outer message.
+            del pwd_audit["eventId"]
+            del pwd_audit["action"]
+            del kcl_audit["eventId"]
+            del kcl_audit["action"]
+            # replacing an authentication information value with itself
+            # still sends the message.
+            self.assertEqual(kcl_audit, pwd_audit)
+            transactions_seen.add(pwd_audit["transactionId"])
+            self.discardMessages()
+
+        with self.subTest("delete"):
+            self.ldb.modify_ldif(
+                f"dn: {dn}\n"
+                "changetype: modify\n"
+                f"delete: {attribute}\n"
+                f"{attribute}: {values[0]}\n")
+            messages = self.waitForMessages(1, dn=dn)
+            print("Received %d messages" % len(messages))
+            self.assertEqual(1, len(messages))
+            audit = messages[0]["passwordChange"]
+            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
+            self.assertEqual("Auth info change", audit["action"])
+            self.assertEqual(dn, audit["dn"])
+            self.assertIn(self.remoteAddress, audit["remoteAddress"])
+            self.assertEqual(session_id, audit["sessionId"])
+            self.assertEqual(0, audit["statusCode"])
+            transactions_seen.add(audit["transactionId"])
+            self.discardMessages()
+
+        with self.subTest("delete that which does not exist"):
+            # still sends a message
+            with self.assertRaises(LdbError) as e:
+                self.ldb.modify_ldif(
+                    f"dn: {dn}\n"
+                    "changetype: modify\n"
+                    f"delete: {attribute}\n"
+                    f"{attribute}: {values[2]}\n")
+            self.assertEqual(e.exception.args[0], ERR_NO_SUCH_ATTRIBUTE)
+            messages = self.waitForMessages(1, dn=dn)
+            print("Received %d messages" % len(messages))
+            # We still get the message on a failed attempt
+            self.assertEqual(1, len(messages))
+            audit = messages[0]["passwordChange"]
+            self.assertEqual(EVT_ID_DIRECTORY_OBJECT_CHANGE, audit["eventId"])
+            self.assertEqual("Auth info change", audit["action"])
+            self.assertEqual(dn, audit["dn"])
+            self.assertIn(self.remoteAddress, audit["remoteAddress"])
+            self.assertEqual(session_id, audit["sessionId"])
+            transactions_seen.add(audit["transactionId"])
+            self.discardMessages()
+            with self.subTest("check status code"):
+                self.assertEqual(ERR_NO_SUCH_ATTRIBUTE, audit["statusCode"])
+                self.assertEqual("No such attribute", audit["status"])
+
+        # these should all have been separate transactions
+        with self.subTest("check transactions"):
+            self.assertEqual(len(transactions_seen), 7)
+            for t in transactions_seen:
+                self.assertTrue(self.is_guid(t))
+

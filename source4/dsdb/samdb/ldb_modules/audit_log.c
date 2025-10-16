@@ -102,6 +102,8 @@ struct audit_private {
  * Does the message contain a change to one of the password attributes? The
  * password attributes are defined in DSDB_PASSWORD_ATTRIBUTES
  *
+ * @param[in] message the ldb_message to examine
+ *
  * @return true if the message contains a password attribute
  *
  */
@@ -120,38 +122,43 @@ static bool has_password_changed(const struct ldb_message *message)
 	return false;
 }
 /*
- * @brief Has a public key been set or unset in this message.
+ * @brief Has authentication information changed.
  *
- * We treat msDS-KeyCredentialLink a bit like a password change,
- * because it changes the remote certificate that is accepted.
+ * authentication information is any non secret information used for
+ * authentication purposes, i.e. msDS-KeyCredentialLink, altSecurityIdentities
  *
- * While this is not a secret, it is significant from a security point
- * of view because, as openssh likes to say, IT IS POSSIBLE THAT
- * SOMEONE IS DOING SOMETHING NASTY by changing trusted keys.
+ * We treat changes to authentication information a bit like a password change,
+ * because it changes the way a user is authenticated.
+ *
+ * While this information is not a secret, it is significant from a security
+ * point of view because, as openssh likes to say, IT IS POSSIBLE THAT
+ * SOMEONE IS DOING SOMETHING NASTY by changing it.
  *
  * A real password change only matters for this reason too. But a
  * *read* of the password hash is a security event in a way that a
- * read of msDS-KeyCredentialLink is not.
+ * read of the authentication information is not.
  *
- * That's why we don't add just public keys to DSDB_PASSWORD_ATTRIBUTES,
+ * That's why we don't add just them to DSDB_PASSWORD_ATTRIBUTES,
  * which is used elsewhere to check secrecy.
  *
  * This does not actually check that the message will change the
- * database -- a message setting msDS-KeyCredentialLink to its current
+ * database -- a message setting an attribute to its current
  * value will still be logged as a change.
  *
- * @return true if the message contains a public key, which currently
- * just means msDS-KeyCredentialLink.
+ * @param[in] message the ldb_message to examine
+ *
+ * @return true if the message contains authentication information
  */
-static bool has_public_key_changed(const struct ldb_message *message)
+static bool has_authentication_information_changed(
+	const struct ldb_message *message)
 {
 	unsigned int i;
 	if (message == NULL) {
 		return false;
 	}
 	for (i = 0; i<message->num_elements; i++) {
-		if (ldb_attr_cmp(message->elements[i].name,
-				 "msDS-KeyCredentialLink") == 0) {
+		if (dsdb_audit_is_authentication_information(
+			message->elements[i].name)) {
 			return true;
 		}
 	}
@@ -166,8 +173,8 @@ static bool has_public_key_changed(const struct ldb_message *message)
  * This routine assumes that the request contains password attributes and that the
  * password ACL checks have been performed by acl.c
  *
- * @param request the ldb_request to inspect
- * @param reply the ldb_reply, will contain the password controls
+ * @param[in] request the ldb_request to inspect
+ * @param[in] reply   the ldb_reply, will contain the password controls
  *
  * @return The windows event code.
  */
@@ -206,8 +213,8 @@ static enum event_id_type get_password_windows_event_id(
  * routine assumes that the request contains password attributes and that the
  * password ACL checks have been performed by acl.c
  *
- * @param request the ldb_request to inspect
- * @param reply the ldb_reply, will contain the password controls
+ * @param[in] request the ldb_request to inspect
+ * @param[in] reply   the ldb_reply, will contain the password controls
  *
  * @return "Change" if the password is being changed.
  *         "Reset"  if the password is being reset.
@@ -246,12 +253,12 @@ static const char *get_password_action(
  *
  * Generate a JSON object detailing an ldb operation.
  *
- * @param module the ldb module
- * @param request the request
- * @param reply the result of the operation.
+ * @param[in] module  the ldb module
+ * @param[in] request the request
+ * @param[in] reply   the result of the operation.
  *
  * @return the generated JSON object, should be freed with json_free.
- *
+ *	   in the event of an error it will return json_empty_object
  *
  */
 static struct json_object operation_json(
@@ -390,12 +397,12 @@ failure:
  *
  * Generate a JSON object detailing a replicated update
  *
- * @param module the ldb module
- * @param request the request
- * @paran reply the result of the operation
+ * @param[in] module  the ldb module
+ * @param[in] request the request
+ * @param[in] reply   the result of the operation
  *
  * @return the generated JSON object, should be freed with json_free.
- *         NULL if there was an error generating the message.
+ *	   in the event of an error it will return json_empty_object
  *
  */
 static struct json_object replicated_update_json(
@@ -508,19 +515,20 @@ failure:
  *
  * Generate a JSON object detailing a password change.
  *
- * @param module the ldb module
- * @param request the request
- * @param reply the result/response
- * @param status the status code returned for the underlying ldb operation.
+ * @param[in] module            the ldb module
+ * @param[in] request           the request
+ * @param[in] reply             the result/response
+ * @param[in] auth_info_changed was authentication information changed?
  *
- * @return the generated JSON object.
+ * @return the generated JSON object, should be freed with json_free.
+ *	   in the event of an error it will return json_empty_object
  *
  */
 static struct json_object password_change_json(
 	struct ldb_module *module,
 	const struct ldb_request *request,
 	const struct ldb_reply *reply,
-	bool public_key_changed)
+	bool auth_info_changed)
 {
 	struct ldb_context *ldb = NULL;
 	const struct dom_sid *sid = NULL;
@@ -542,8 +550,8 @@ static struct json_object password_change_json(
 	sid = dsdb_audit_get_user_sid(module);
 	dn = dsdb_audit_get_primary_dn(request);
 	unique_session_token = dsdb_audit_get_unique_session_token(module);
-	if (public_key_changed) {
-		action = "Public key change";
+	if (auth_info_changed) {
+		action = "Auth info change";
 		event_id = EVT_ID_DIRECTORY_OBJECT_CHANGE;
 	} else  {
 		action = get_password_action(request, reply);
@@ -636,12 +644,12 @@ failure:
  * Create a JSON object detailing a transaction transaction life cycle events,
  * i.e. begin, commit, roll back
  *
- * @param action a one word description of the event/action
- * @param transaction_id the GUID identifying the current transaction.
- * @param status the status code returned by the operation
- * @param duration the duration of the operation.
+ * @param action[in]         a one word description of the event/action
+ * @param transaction_id[in] the GUID identifying the current transaction.
+ * @param duration[in]       the duration of the operation.
  *
- * @return a JSON object detailing the event
+ * @return the generated JSON object, should be freed with json_free.
+ *	   in the event of an error it will return json_empty_object
  */
 static struct json_object transaction_json(
 	const char *action,
@@ -714,10 +722,14 @@ failure:
  *
  * Generate a JSON object containing details of a commit failure.
  *
- * @param action the commit action, "commit" or "prepare"
- * @param status the status code returned by commit
- * @param reason any extra failure information/reason available
- * @param transaction_id the GUID identifying the current transaction.
+ * @param action[in]         the commit action, "commit" or "prepare"
+ * @param duration[in]       the duration of the operation.
+ * @param status[in]         the status code returned by commit
+ * @param reason[in]         any extra failure information/reason available
+ * @param transaction_id[in] the GUID identifying the current transaction.
+ *
+ * @return the generated JSON object, should be freed with json_free.
+ *	   in the event of an error it will return json_empty_object
  */
 static struct json_object commit_failure_json(
 	const char *action,
@@ -802,11 +814,12 @@ failure:
  *
  * Generate a human readable log line detailing a password change.
  *
- * @param mem_ctx The talloc context that will own the generated log line.
- * @param module the ldb module
- * @param request the request
- * @param reply the result/response
- * @param status the status code returned for the underlying ldb operation.
+ * @param[in] mem_ctx           the talloc context that will own the
+ *                              generated log line.
+ * @param[in] module            the ldb module
+ * @param[in] request           the request
+ * @param[in] reply             the result/response
+ * @param[in] auth_info_changed was authentication information changed?
  *
  * @return the generated log line.
  */
@@ -815,7 +828,7 @@ static char *password_change_human_readable(
 	struct ldb_module *module,
 	const struct ldb_request *request,
 	const struct ldb_reply *reply,
-	bool is_public_key_change)
+	bool auth_info_change)
 {
 	struct ldb_context *ldb = NULL;
 	const char *remote_host = NULL;
@@ -834,8 +847,8 @@ static char *password_change_human_readable(
 	sid = dsdb_audit_get_user_sid(module);
 	timestamp = audit_get_timestamp(ctx);
 
-	if (is_public_key_change) {
-		action = "Public key change";
+	if (auth_info_change) {
+		action = "Auth info change";
 	} else {
 		action = get_password_action(request, reply);
 	}
@@ -862,11 +875,13 @@ static char *password_change_human_readable(
  * Base64 values are enclosed in {}
  * Truncated values are indicated by three trailing dots "..."
  *
- * @param ldb The ldb_context
- * @param buffer The attributes will be appended to the buffer.
- *               assumed to have been allocated via talloc.
- * @param operation The operation type
- * @param message the message to process
+ * @param[in]  ldb       the ldb_context
+ * @param[out] buffer    the attributes will be appended to the buffer.
+ *                       assumed to have been allocated via talloc.
+ * @param[in]  operation the operation type
+ * @param[in]  message   the message to process
+ *
+ * @return a pointer to buffer
  *
  */
 static char *log_attributes(
@@ -959,10 +974,10 @@ static char *log_attributes(
  *
  * Generate a human readable log entry detailing an ldb operation.
  *
- * @param mem_ctx The talloc context owning the returned string.
- * @param module the ldb module
- * @param request the request
- * @param reply the result of the operation
+ * @param[in] mem_ctx the talloc context owning the returned string.
+ * @param[in] module  the ldb module
+ * @param[in] request the request
+ * @param[in] reply   the result of the operation
  *
  * @return the log entry.
  *
@@ -1038,10 +1053,10 @@ static char *operation_human_readable(
  *
  * Generate a human readable log entry detailing a replicated update operation
  *
- * @param mem_ctx The talloc context owning the returned string.
- * @param module the ldb module
- * @param request the request
- * @param reply the result of the operation.
+ * @param[in] mem_ctx the talloc context owning the returned string.
+ * @param[in] module  the ldb module
+ * @param[in] request the request
+ * @param[in] reply   the result of the operation.
  *
  * @return the log entry.
  *
@@ -1100,9 +1115,9 @@ static char *replicated_update_human_readable(
  * Create a human readable log entry detailing a transaction event.
  * i.e. begin, commit, roll back
  *
- * @param mem_ctx The talloc context owning the returned string.
- * @param action a one word description of the event/action
- * @param duration the duration of the transaction.
+ * @param[in] mem_ctx  the talloc context owning the returned string.
+ * @param[in] action   a one word description of the event/action
+ * @param[in] duration the duration of the transaction.
  *
  * @return the log entry
  */
@@ -1134,10 +1149,11 @@ static char *transaction_human_readable(
  *
  * Generate generate a human readable log entry detailing a commit failure.
  *
- * @param mem_ctx The talloc context owning the returned string.
- * @param action the commit action, "prepare" or "commit"
- * @param status the status code returned by commit
- * @param reason any extra failure information/reason available
+ * @param[in] mem_ctx  the talloc context owning the returned string.
+ * @param[in] action   the commit action, "prepare" or "commit"
+ * @param[in] duration the duration of the transaction.
+ * @param[in] status   the status code returned by commit
+ * @param[in] reason   any extra failure information/reason available
  *
  * @return the log entry
  */
@@ -1174,10 +1190,9 @@ static char *commit_failure_human_readable(
  * Log the details of an ldb operation in JSON and or human readable format
  * and send over the message bus.
  *
- * @param module the ldb_module
- * @param request the operation request.
- * @param reply the operation result.
- * @param the status code returned for the operation.
+ * @param[in] module  the ldb_module
+ * @param[in] request the operation request.
+ * @param[in] reply   the operation result.
  *
  */
 static void log_standard_operation(
@@ -1188,7 +1203,8 @@ static void log_standard_operation(
 
 	const struct ldb_message *message = dsdb_audit_get_message(request);
 	bool password_changed = has_password_changed(message);
-	bool public_key_changed = has_public_key_changed(message);
+	bool authentication_information_changed
+		= has_authentication_information_changed(message);
 	struct audit_private *audit_private =
 		talloc_get_type_abort(ldb_module_get_private(module),
 				      struct audit_private);
@@ -1225,7 +1241,7 @@ static void log_standard_operation(
 				PASSWORD_LOG_LVL);
 			TALLOC_FREE(entry);
 		}
-		if (public_key_changed) {
+		if (authentication_information_changed) {
 			char *entry = NULL;
 			entry = password_change_human_readable(
 				ctx,
@@ -1279,7 +1295,7 @@ static void log_standard_operation(
 			}
 			json_free(&json);
 		}
-		if (public_key_changed) {
+		if (authentication_information_changed) {
 			struct json_object json;
 			json = password_change_json(module, request, reply, true);
 			audit_log_json(
@@ -1305,9 +1321,9 @@ static void log_standard_operation(
  * Log the details of a replicated update in JSON and or human readable
  * format and send over the message bus.
  *
- * @param module the ldb_module
+ * @param module  the ldb_module
  * @param request the operation request
- * @param reply the result of the operation.
+ * @param reply   the result of the operation.
  *
  */
 static void log_replicated_operation(
@@ -1362,9 +1378,9 @@ static void log_replicated_operation(
  * Log the details of an ldb operation in JSON and or human readable format
  * and send over the message bus.
  *
- * @param module the ldb_module
- * @param request the operation request
- * @part reply the result of the operation
+ * @param[in] module  the ldb_module
+ * @param[in] request the operation request
+ * @param[in] reply   the result of the operation
  *
  */
 static void log_operation(
@@ -1391,9 +1407,9 @@ static void log_operation(
  * Log the details of a transaction event in JSON and or human readable format
  * and send over the message bus.
  *
- * @param module the ldb_module
- * @param action the transaction event i.e. begin, commit, roll back.
- * @param log_level the logging level
+ * @param[in] module    the ldb_module
+ * @param[in] action    the transaction event i.e. begin, commit, roll back.
+ * @param[in] log_level the logging level
  *
  */
 static void log_transaction(
@@ -1449,9 +1465,9 @@ static void log_transaction(
  * Log the details of a commit failure in JSON and or human readable
  * format and send over the message bus.
  *
- * @param module the ldb_module
- * @param action the commit action "prepare" or "commit"
- * @param status the ldb status code returned by prepare commit.
+ * @param[in] module the ldb_module
+ * @param[in] action the commit action "prepare" or "commit"
+ * @param[in] status the ldb status code returned by prepare commit.
  *
  */
 static void log_commit_failure(
@@ -1527,8 +1543,8 @@ struct audit_callback_context {
  * the operations, a callback needs to be registered to process the results
  * of the LDB operations.
  *
- * @param req the ldb request
- * @param res the result of the operation
+ * @param[in] req the ldb request
+ * @param[in] res the result of the operation
  *
  * @return the LDB_STATUS
  */
@@ -1584,8 +1600,8 @@ static int audit_callback(struct ldb_request *req, struct ldb_reply *ares)
  * Add the current transaction identifier in the module private data,
  * to the request as a control.
  *
- * @param module
- * @param req the request.
+ * @param[in] module the ldb_module
+ * @param[in] req    the request.
  *
  * @return an LDB_STATUS code, LDB_SUCCESS if successful.
  */
@@ -1620,8 +1636,8 @@ static int add_transaction_id(
  *
  * Log the details of an add operation.
  *
- * @param module the ldb_module
- * @param req the ldb_request
+ * @param[in] module the ldb_module
+ * @param[in] req    the ldb_request
  *
  * @return ldb status code
  */
@@ -1671,8 +1687,8 @@ static int log_add(
  *
  * Log the details of an delete operation.
  *
- * @param module the ldb_module
- * @param req the ldb_request
+ * @param[in] module the ldb_module
+ * @param[in] req    the ldb_request
  *
  * @return ldb status code
  */
@@ -1721,8 +1737,8 @@ static int log_delete(
  *
  * Log the details of a modify operation.
  *
- * @param module the ldb_module
- * @param req the ldb_request
+ * @param[in] module the ldb_module
+ * @param[in] req    the ldb_request
  *
  * @return ldb status code
  */
@@ -1773,8 +1789,8 @@ static int log_modify(
  * process a transaction start, as we don't currently log transaction starts
  * just generate the new transaction_id.
  *
- * @param module the ldb_module
- * @param req the ldb_request
+ * @param[in] module the ldb_module
+ * @param[in] req    the ldb_request
  *
  * @return ldb status code
  */
@@ -1801,8 +1817,8 @@ static int log_start_transaction(struct ldb_module *module)
  * Log the details of a prepare commit, currently only details of
  * failures are logged.
  *
- * @param module the ldb_module
- * @param req the ldb_request
+ * @param[in] module the ldb_module
+ * @param[in] req    the ldb_request
  *
  * @return ldb status code
  */
@@ -1825,8 +1841,8 @@ static int log_prepare_commit(struct ldb_module *module)
  * process a transaction end, as we don't currently log transaction ends
  * just clear transaction_id.
  *
- * @param module the ldb_module
- * @param req the ldb_request
+ * @param[in] module the ldb_module
+ * @param[in] req    the ldb_request
  *
  * @return ldb status code
  */
@@ -1859,8 +1875,8 @@ static int log_end_transaction(struct ldb_module *module)
  *
  * Log details of a transaction roll back.
  *
- * @param module the ldb_module
- * @param req the ldb_request
+ * @param[in] module the ldb_module
+ * @param[in] req    the ldb_request
  *
  * @return ldb status code
  */
@@ -1880,8 +1896,8 @@ static int log_del_transaction(struct ldb_module *module)
  *
  * Log the details of an extended operation.
  *
- * @param module the ldb_module
- * @param req the ldb_request
+ * @param[in] module the ldb_module
+ * @param[in] req    the ldb_request
  *
  * @return ldb status code
  */

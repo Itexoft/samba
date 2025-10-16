@@ -69,7 +69,9 @@
 	"msDS-ManagedPasswordInterval",		\
 	"whenCreated",				\
 	/* Required for Key Trust authentication */\
-	"msDS-CustomKeyInformation"
+	"msDS-KeyCredentialLink",                \
+	/* Required for certificate mapping */  \
+	"altSecurityIdentities"
 
 #define AUTHN_POLICY_ATTRS                     \
 	/* Required for authentication policies / silos */ \

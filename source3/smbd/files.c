@@ -92,13 +92,16 @@ fail:
 
 void fsp_set_gen_id(files_struct *fsp)
 {
-	static uint64_t gen_id = 1;
+	static uint64_t gen_id = UINT32_MAX;
 
 	/*
-	 * A billion of 64-bit increments per second gives us
-	 * more than 500 years of runtime without wrap.
+	 * These ids are only used for internal opens, which gives us 4 billion
+	 * opens until we wrap.
 	 */
 	gen_id++;
+	if (gen_id == 0) {
+		gen_id = UINT32_MAX;
+	}
 	fh_set_gen_id(fsp->fh, gen_id);
 }
 
@@ -114,6 +117,7 @@ NTSTATUS fsp_bind_smb(struct files_struct *fsp, struct smb_request *req)
 
 	if (req == NULL) {
 		DBG_DEBUG("INTERNAL_OPEN_ONLY, skipping smbXsrv_open\n");
+		fsp_set_gen_id(fsp);
 		return NT_STATUS_OK;
 	}
 
@@ -129,6 +133,7 @@ NTSTATUS fsp_bind_smb(struct files_struct *fsp, struct smb_request *req)
 	}
 	fsp->op = op;
 	op->compat = fsp;
+	fh_set_gen_id(fsp->fh, fsp->op->global->open_global_id);
 	fsp->fnum = op->local_id;
 
 	fsp->mid = req->mid;
@@ -159,8 +164,6 @@ NTSTATUS file_new(struct smb_request *req, connection_struct *conn,
 		file_free(NULL, fsp);
 		return status;
 	}
-
-	fsp_set_gen_id(fsp);
 
 	/*
 	 * Create an smb_filename with "" for the base_name.  There are very
@@ -422,7 +425,6 @@ static NTSTATUS openat_pathref_fullname(
 	}
 
 	GetTimeOfDay(&fsp->open_time);
-	fsp_set_gen_id(fsp);
 	ZERO_STRUCT(conn->sconn->fsp_fi_cache);
 
 	fsp->fsp_flags.is_pathref = true;
@@ -599,7 +601,6 @@ NTSTATUS open_rootdir_pathref_fsp(connection_struct *conn,
 		goto fail;
 	}
 	GetTimeOfDay(&fsp->open_time);
-	fsp_set_gen_id(fsp);
 	ZERO_STRUCT(conn->sconn->fsp_fi_cache);
 	fsp->fsp_flags.is_pathref = true;
 
@@ -679,7 +680,6 @@ NTSTATUS open_stream_pathref_fsp(
 	}
 
 	GetTimeOfDay(&fsp->open_time);
-	fsp_set_gen_id(fsp);
 	ZERO_STRUCT(conn->sconn->fsp_fi_cache);
 
 	fsp->fsp_flags.is_pathref = true;
@@ -1079,7 +1079,6 @@ NTSTATUS openat_pathref_fsp_nosymlink(
 	}
 
 	GetTimeOfDay(&fsp->open_time);
-	fsp_set_gen_id(fsp);
 	ZERO_STRUCT(conn->sconn->fsp_fi_cache);
 
 	fsp->fsp_name = &full_fname;
@@ -1552,7 +1551,6 @@ NTSTATUS openat_pathref_fsp_lcomp(struct files_struct *dirfsp,
 	}
 
 	GetTimeOfDay(&fsp->open_time);
-	fsp_set_gen_id(fsp);
 	ZERO_STRUCT(conn->sconn->fsp_fi_cache);
 
 	fsp->fsp_flags.is_pathref = true;
@@ -1672,9 +1670,7 @@ NTSTATUS openat_pathref_fsp_dot(TALLOC_CTX *mem_ctx,
 	struct connection_struct *conn = dirfsp->conn;
 	struct files_struct *fsp = NULL;
 	struct smb_filename *full_fname = NULL;
-        struct vfs_open_how how = {
-                .flags = O_RDONLY | O_NONBLOCK | O_NOFOLLOW,
-        };
+	struct vfs_open_how how = { .flags = O_NOFOLLOW, };
         struct smb_filename *dot = NULL;
         NTSTATUS status;
         int fd;
@@ -1684,7 +1680,9 @@ NTSTATUS openat_pathref_fsp_dot(TALLOC_CTX *mem_ctx,
 #endif
 
 #ifdef O_PATH
-        how.flags = O_PATH;
+	how.flags |= O_PATH;
+#else
+	how.flags |= (O_RDONLY | O_NONBLOCK);
 #endif
 
 	dot = synthetic_smb_fname(mem_ctx, ".", NULL, NULL, 0, flags);
@@ -1699,7 +1697,6 @@ NTSTATUS openat_pathref_fsp_dot(TALLOC_CTX *mem_ctx,
 	}
 
 	GetTimeOfDay(&fsp->open_time);
-	fsp_set_gen_id(fsp);
 	ZERO_STRUCT(conn->sconn->fsp_fi_cache);
 
 	fsp->fsp_flags.is_pathref = true;

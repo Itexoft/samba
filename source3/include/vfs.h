@@ -32,6 +32,8 @@
 #undef vfs_ops
 #endif
 
+#include "smbprofile.h"
+
 /*
  * As we're now (thanks Andrew ! :-) using file_structs and connection
  * structs in the vfs - then anyone writing a vfs must include includes.h...
@@ -412,6 +414,7 @@ struct ea_list;
 struct smb_file_time;
 struct smb_filename;
 struct dfs_GetDFSReferral;
+struct pthreadpool_tevent;
 
 typedef union unid_t {
 	uid_t uid;
@@ -462,6 +465,15 @@ typedef struct files_struct {
 		bool lock_failure_seen : 1;
 		bool encryption_required : 1;
 		bool fstat_before_close : 1;
+		/*
+		 * For POSIX clients struct files_struct.fsp_flags.posix_open
+		 * and struct smb_filename.flags SMB_FILENAME_POSIX_PATH will
+		 * always be set to the same value.
+		 *
+		 * For macOS clients vfs_fruit with fruit:posix_open=yes, we
+		 * deliberately set both flags to fsp_flags.posix_open=true
+		 * while SMB_FILENAME_POSIX_PATH will not be set.
+		 */
 		bool posix_open : 1;
 		bool posix_append : 1;
 		bool ntcreatex_deny_dos : 1;
@@ -889,6 +901,15 @@ struct smb_filename {
 	struct fsp_smb_fname_link *fsp_link;
 };
 
+/*
+ * For POSIX clients struct files_struct.fsp_flags.posix_open
+ * and struct smb_filename.flags SMB_FILENAME_POSIX_PATH will
+ * always be set to the same value.
+ *
+ * For macOS clients vfs_fruit with fruit:posix_open=yes, we
+ * deliberately set both flags to fsp_flags.posix_open=true
+ * while SMB_FILENAME_POSIX_PATH will not be set.
+ */
 #define SMB_FILENAME_POSIX_PATH		0x01
 
 enum vfs_translate_direction {
@@ -922,6 +943,25 @@ struct vfs_rename_how {
 };
 
 #define VFS_PWRITE_APPEND_OFFSET -1
+
+struct vfs_pthreadpool_job_state {
+	struct tevent_context *ev;
+	struct vfs_handle_struct *handle;
+	files_struct *dir_fsp;
+	const struct smb_filename *smb_fname;
+
+	/*
+	 * The following variables are talloced off "state" which is protected
+	 * by a destructor and thus are guaranteed to be safe to be used in the
+	 * job function in the worker thread.
+	 */
+	char *name;
+	const struct security_unix_token *token;
+
+	struct vfs_aio_state vfs_aio_state;
+	SMBPROFILE_BYTES_ASYNC_STATE(profile_bytes);
+	SMBPROFILE_BYTES_ASYNC_STATE(profile_bytes_x);
+};
 
 /*
     Available VFS operations. These values must be in sync with vfs_ops struct
@@ -1853,6 +1893,8 @@ void *vfs_fetch_fsp_extension(vfs_handle_struct *handle, const struct files_stru
 
 void smb_vfs_assert_all_fns(const struct vfs_fn_pointers* fns,
 			    const char *module);
+
+bool vfswrap_check_async_with_thread_creds(struct pthreadpool_tevent *pool);
 
 /*
  * Helper functions from source3/modules/vfs_not_implemented.c

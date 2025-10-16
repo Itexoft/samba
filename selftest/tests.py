@@ -57,7 +57,14 @@ planpythontestsuite("none", "samba.tests.source")
 planpythontestsuite("none", "samba.tests.source_chars")
 
 if have_man_pages_support:
-    planpythontestsuite("none", "samba.tests.docs")
+    # This is a unit test which doesn't need any wrappers. We unset LD_PRELOAD
+    # as it is causing issues with Python >= 3.14 passing sockets around if a
+    # task is running concurrently.
+    planpythontestsuite(
+        "none",
+        "samba.tests.docs",
+        environ={'LD_PRELOAD': ''}
+    )
 
 try:
     import testscenarios
@@ -629,6 +636,8 @@ plantestsuite("samba.unittests.cmdline", "none",
 if have_heimdal_support:
     plantestsuite("samba.source4.kdc.tests.db_glue", "none",
                 [os.path.join(bindir(), "default/source4/kdc/test_db_glue")])
+    plantestsuite("samba.source4.kdc.tests.sdb_to_hdb", "none",
+                [os.path.join(bindir(), "default/source4/kdc/test_sdb_to_hdb")])
 
 # Run the Rust cargo tests
 planpythontestsuite("none", "samba.tests.rust")
