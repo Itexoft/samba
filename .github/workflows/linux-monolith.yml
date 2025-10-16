@@ -159,7 +159,7 @@ jobs:
             done
       
             patchelf --remove-rpath "$prog" 2>/dev/null || true
-            patchelf --force-rpath --set-rpath ./lib ./libs "$prog"
+            patchelf --force-rpath --set-rpath './lib:./libs' "$prog"
             ldd "$prog"
           }
       
