@@ -187,14 +187,10 @@ jobs:
             if [ -n "$src" ]; then bundle_one "$p" "$src"; built="$built $p"; else missing="$missing $p"; fi
           done
       
-          for f in $(find bin -type f -name 'lib*private-samba*.so*' -o -name 'libsecrets*.*samba*.so*' 2>/dev/null); do
+          for f in $(find bin -type f -name 'lib*private-samba*.so*' -o -name 'libsecrets*.*samba*.so*' -o -name 'libsecrets3-private-samba*.so*' 2>/dev/null); do
             base="$(basename "$f")"
             [ -f "$DST/$base" ] || cp -pL "$f" "$DST/$base"
           done
-          [ -e "$DST/libsecrets3-private-samba.so" ] || {
-            c="$(ls "$DST"/libsecrets3-private-samba*.so* 2>/dev/null | head -n 1 || true)"
-            [ -n "$c" ] && ln -sf "$(basename "$c")" "$DST/libsecrets3-private-samba.so" || true
-          }
       
           for p in smbclient tdbtool tdbbackup; do
             [ -f "$p" ] && ensure_dlopen_libs "$p" || true
