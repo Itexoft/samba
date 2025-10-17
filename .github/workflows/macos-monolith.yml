@@ -84,7 +84,7 @@ jobs:
           PKG_CONFIG_PATH="$PKG_CONFIG_PATH" LDFLAGS="$LDFLAGS" PYTHON="$PY" \
           ./configure --without-acl-support --without-gettext --bundled-libraries=ALL \
             --nonshared-binary=net,rpcclient,smbcacls,smbcontrol,smbcquotas,smbd/smbd,smbget,smbpasswd,smbstatus,smbtree,tdbbackup,tdbtool,testparm,pdbedit \
-            --with-static-modules=nfs4acl_xattr,vfs_fruit,vfs_streams_xattr,vfs_catia,vfs_acl_xattr,vfs_acl_tdb,vfs_xattr_tdb,vfs_recycle,vfs_shadow_copy2,vfs_full_audit,vfs_extd_audit,vfs_readahead,vfs_preopen,vfs_aio_pthread,vfs_fake_perms,vfs_readonly,vfs_offline,vfs_time_audit,vfs_commit,vfs_crossrename,vfs_dirsort,vfs_expand_msdfs,vfs_default_quota,vfs_streams_depot,vfs_syncops,vfs_widelinks,vfs_worm,vfs_audit,auth_unix,auth_winbind,auth_builtin,pdb_tdbsam,pdb_smbpasswd,pdb_ldapsam \
+            --with-static-modules=vfs_nfs4acl_xattr,vfs_fruit,vfs_streams_xattr,vfs_catia,vfs_acl_xattr,vfs_acl_tdb,vfs_xattr_tdb,vfs_recycle,vfs_shadow_copy2,vfs_full_audit,vfs_extd_audit,vfs_readahead,vfs_preopen,vfs_aio_pthread,vfs_fake_perms,vfs_readonly,vfs_offline,vfs_time_audit,vfs_commit,vfs_crossrename,vfs_dirsort,vfs_expand_msdfs,vfs_default_quota,vfs_streams_depot,vfs_syncops,vfs_widelinks,vfs_worm,vfs_audit,auth_unix,auth_winbind,auth_builtin,pdb_tdbsam,pdb_smbpasswd,pdb_ldapsam \
             --with-shared-modules=idmap_tdb,idmap_tdb2,idmap_rid,idmap_autorid,idmap_ad,idmap_ldap,idmap_script,idmap_nss,idmap_rfc2307,pdb_wbc_sam \
             --without-gpgme
           st=$?
